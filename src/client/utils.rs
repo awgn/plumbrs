@@ -5,12 +5,14 @@ use http::header::HeaderValue;
 use http::{HeaderMap, StatusCode, header};
 use http_body_util::BodyExt;
 use http_body_util::Full;
+use hyper::body::Body;
 use hyper::body::Incoming;
 use hyper::client::conn::http1 as conn1;
 use hyper::client::conn::http2 as conn2;
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::{TokioExecutor, TokioIo};
+use std::pin::Pin;
 use std::{str::FromStr, time::Instant};
 use tokio::net::TcpStream;
 
@@ -91,11 +93,16 @@ pub async fn discard_body(
     Ok(status_code)
 }
 
-pub async fn build_http1_connection(
+pub async fn build_http1_connection<B>(
     endpoint: &'static str,
     stats: &mut Statistics,
     _opts: &Options,
-) -> Option<(conn1::SendRequest<Full<Bytes>>, tokio::task::JoinHandle<()>)> {
+) -> Option<(conn1::SendRequest<B>, tokio::task::JoinHandle<()>)>
+where
+    B: Body + Send + 'static,
+    B::Data: Send,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
     let stream_res = TcpStream::connect(endpoint)
         .await
         .and_then(|s| s.set_nodelay(true).map(|_| s));
@@ -125,11 +132,16 @@ pub async fn build_http1_connection(
     Some((sender, conn))
 }
 
-pub async fn build_http2_connection(
+pub async fn build_http2_connection<B>(
     endpoint: &'static str,
     stats: &mut Statistics,
     opts: &Options,
-) -> Option<(conn2::SendRequest<Full<Bytes>>, tokio::task::JoinHandle<()>)> {
+) -> Option<(conn2::SendRequest<B>, tokio::task::JoinHandle<()>)>
+where
+    B: Body + Send + 'static + Unpin,
+    B::Data: Send,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
     let stream_res = TcpStream::connect(endpoint)
         .await
         .and_then(|s| s.set_nodelay(true).map(|_| s));
@@ -170,7 +182,12 @@ pub async fn build_http2_connection(
     Some((sender, conn))
 }
 
-pub fn build_http_connection_legacy(opts: &Options) -> Client<HttpConnector, Full<Bytes>> {
+pub fn build_http_connection_legacy<B>(opts: &Options) -> Client<HttpConnector, B>
+    where
+    B: Body + Send + 'static,
+    B::Data: Send,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
     let mut builder = Client::builder(TokioExecutor::new());
     if opts.http2 {
         builder.http2_only(opts.http2);

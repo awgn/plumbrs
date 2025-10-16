@@ -8,7 +8,7 @@ use crate::client::ClientType;
 #[derive(Parser, Debug, Clone)]
 pub struct Options {
     #[arg(
-        help = "Number of threads",
+        help = "Number of total threads",
         short = 't',
         long = "threads",
         default_value_t = 1
@@ -42,7 +42,7 @@ pub struct Options {
         long = "requests"
     )]
     pub requests: Option<u32>,
-    #[arg(help = "Client type", short = 'T', long = "client-type", default_value_t = ClientType::Hyper)]
+    #[arg(help = "Http Client", short = 'C', long = "client", default_value_t = ClientType::Hyper)]
     pub client_type: ClientType,
     #[arg(
         help = "Tokio global queue interval (ticks)",
@@ -116,8 +116,8 @@ fn parse_http_method(arg: &str) -> Result<Method, InvalidMethod> {
 }
 
 fn parse_key_val(s: &str) -> Result<(String, String), String> {
-    s.find('=')
-        .ok_or_else(|| "argomento non valido: deve essere nel formato KEY=VALUE".to_string())
+    s.find(':')
+        .ok_or_else(|| "invalid argument (expected KEY:VALUE)".to_string())
         .map(|index| {
             let (key, value) = s.split_at(index);
             (key.to_string(), value[1..].to_string())

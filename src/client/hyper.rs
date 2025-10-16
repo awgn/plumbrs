@@ -1,6 +1,5 @@
-use crate::stats::Statistics;
-
 use crate::Options;
+use crate::stats::Statistics;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
