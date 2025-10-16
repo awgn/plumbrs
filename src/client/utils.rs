@@ -1,10 +1,8 @@
 use crate::Options;
 use crate::stats::Statistics;
-use bytes::Bytes;
 use http::header::HeaderValue;
-use http::{HeaderMap, StatusCode, header};
+use http::{header, HeaderMap, Request, Response, StatusCode};
 use http_body_util::BodyExt;
-use http_body_util::Full;
 use hyper::body::Body;
 use hyper::body::Incoming;
 use hyper::client::conn::http1 as conn1;
@@ -12,7 +10,6 @@ use hyper::client::conn::http2 as conn2;
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use std::pin::Pin;
 use std::{str::FromStr, time::Instant};
 use tokio::net::TcpStream;
 
@@ -93,93 +90,159 @@ pub async fn discard_body(
     Ok(status_code)
 }
 
-pub async fn build_http1_connection<B>(
-    endpoint: &'static str,
-    stats: &mut Statistics,
-    _opts: &Options,
-) -> Option<(conn1::SendRequest<B>, tokio::task::JoinHandle<()>)>
-where
-    B: Body + Send + 'static,
-    B::Data: Send,
-    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
-{
-    let stream_res = TcpStream::connect(endpoint)
-        .await
-        .and_then(|s| s.set_nodelay(true).map(|_| s));
-    let stream = match stream_res {
-        Ok(s) => s,
-        Err(ref err) => {
-            stats.err(format!("{err:?}"));
-            return None;
-        }
-    };
-    let stream = TokioIo::new(stream);
-    let builder = conn1::Builder::new();
-    let conn_res = builder.handshake(stream).await;
-    let (sender, connection) = match conn_res {
-        Ok(p) => p,
-        Err(ref err) => {
-            stats.err(format!("{err:?}"));
-            return None;
-        }
-    };
-    let conn = tokio::task::spawn(async move {
-        if let Err(err) = connection.await {
-            eprintln!("Error in connection: {}", err)
-        }
-    });
+pub struct Http1;
+pub struct Http2;
 
-    Some((sender, conn))
+pub trait RequestSender<B: Body> {
+    fn send_request(&mut self, req: Request<B>) -> impl Future<Output = hyper::Result<Response<Incoming>>>;
+    fn ready(&mut self) -> impl Future<Output = hyper::Result<()>>;
 }
 
-pub async fn build_http2_connection<B>(
-    endpoint: &'static str,
-    stats: &mut Statistics,
-    opts: &Options,
-) -> Option<(conn2::SendRequest<B>, tokio::task::JoinHandle<()>)>
-where
-    B: Body + Send + 'static + Unpin,
-    B::Data: Send,
-    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+impl<B> RequestSender<B> for conn1::SendRequest<B>
+    where B: Body + 'static
 {
-    let stream_res = TcpStream::connect(endpoint)
-        .await
-        .and_then(|s| s.set_nodelay(true).map(|_| s));
-    let stream = match stream_res {
-        Ok(s) => s,
-        Err(ref err) => {
-            stats.err(format!("{err:?}"));
-            return None;
-        }
-    };
-    let stream = TokioIo::new(stream);
-    let mut builder = conn2::Builder::new(TokioExecutor::new());
-
-    // set http2 connection options...
-    builder.adaptive_window(opts.http2_adaptive_window.unwrap_or(false));
-    builder.initial_max_send_streams(opts.http2_initial_max_send_streams);
-    if let Some(v) = opts.http2_max_concurrent_streams {
-        builder.max_concurrent_streams(v);
-    }
-    if let Some(v) = opts.http2_max_concurrent_reset_streams {
-        builder.max_concurrent_reset_streams(v);
+    async fn send_request(&mut self, req: Request<B>) -> hyper::Result<Response<Incoming>> {
+        self.send_request(req).await
     }
 
-    let conn_res = builder.handshake(stream).await;
-    let (sender, connection) = match conn_res {
-        Ok(p) => p,
-        Err(ref err) => {
-            stats.err(format!("{err:?}"));
-            return None;
-        }
-    };
-    let conn = tokio::task::spawn(async move {
-        if let Err(err) = connection.await {
-            eprintln!("Error in connection: {}", err)
-        }
-    });
+    async fn ready(&mut self) -> hyper::Result<()> {
+        self.ready().await
+    }
+}
 
-    Some((sender, conn))
+impl<B> RequestSender<B> for conn2::SendRequest<B>
+    where B: Body + 'static
+{
+    async fn send_request(&mut self, req: Request<B>) -> hyper::Result<Response<Incoming>> {
+        self.send_request(req).await
+    }
+
+    async fn ready(&mut self) -> hyper::Result<()> {
+        self.ready().await
+    }
+}
+
+pub trait HttpConnectionBuilder {
+    type Sender<B>: RequestSender<B>
+        where
+            B: Body + Send + Unpin + 'static,
+            B::Data: Send,
+            B::Error: Into<Box<dyn std::error::Error + Send + Sync>>;
+
+    fn build_connection<B>(
+        endpoint: &'static str,
+        stats: &mut Statistics,
+        _opts: &Options,
+    ) -> impl Future<Output = Option<(Self::Sender<B>, tokio::task::JoinHandle<()>)>>
+    where
+        B: Body + Send + Unpin + 'static,
+        B::Data: Send,
+        B::Error: Into<Box<dyn std::error::Error + Send + Sync>>;
+}
+
+impl HttpConnectionBuilder for Http1 {
+    type Sender<B> = conn1::SendRequest<B>
+        where
+            B: Body + Send + Unpin + 'static,
+            B::Data: Send,
+            B::Error: Into<Box<dyn std::error::Error + Send + Sync>>;
+
+    async fn build_connection<B>(
+        endpoint: &'static str,
+        stats: &mut Statistics,
+        _opts: &Options,
+    ) -> Option<(Self::Sender<B>, tokio::task::JoinHandle<()>)>
+    where
+        B: Body + Send + Unpin + 'static,
+        B::Data: Send,
+        B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    {
+        let stream_res = TcpStream::connect(endpoint)
+            .await
+            .and_then(|s| s.set_nodelay(true).map(|_| s));
+        let stream = match stream_res {
+            Ok(s) => s,
+            Err(ref err) => {
+                stats.err(format!("{err:?}"));
+                return None;
+            }
+        };
+        let stream = TokioIo::new(stream);
+        let builder = conn1::Builder::new();
+        let conn_res = builder.handshake(stream).await;
+        let (sender, connection) = match conn_res {
+            Ok(p) => p,
+            Err(ref err) => {
+                stats.err(format!("{err:?}"));
+                return None;
+            }
+        };
+        let conn = tokio::task::spawn(async move {
+            if let Err(err) = connection.await {
+                eprintln!("Error in connection: {}", err)
+            }
+        });
+
+        Some((sender, conn))
+    }
+}
+
+impl HttpConnectionBuilder for Http2 {
+    type Sender<B> = conn2::SendRequest<B>
+        where
+            B: Body + Send + 'static + Unpin,
+            B::Data: Send,
+            B::Error: Into<Box<dyn std::error::Error + Send + Sync>>;
+
+    async fn build_connection<B>(
+        endpoint: &'static str,
+        stats: &mut Statistics,
+        opts: &Options,
+    ) -> Option<(Self::Sender<B>, tokio::task::JoinHandle<()>)>
+    where
+        B: Body + Send + 'static + Unpin,
+        B::Data: Send,
+        B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    {
+        let stream_res = TcpStream::connect(endpoint)
+            .await
+            .and_then(|s| s.set_nodelay(true).map(|_| s));
+        let stream = match stream_res {
+            Ok(s) => s,
+            Err(ref err) => {
+                stats.err(format!("{err:?}"));
+                return None;
+            }
+        };
+        let stream = TokioIo::new(stream);
+        let mut builder = conn2::Builder::new(TokioExecutor::new());
+
+        // set http2 connection options...
+        builder.adaptive_window(opts.http2_adaptive_window.unwrap_or(false));
+        builder.initial_max_send_streams(opts.http2_initial_max_send_streams);
+        if let Some(v) = opts.http2_max_concurrent_streams {
+            builder.max_concurrent_streams(v);
+        }
+        if let Some(v) = opts.http2_max_concurrent_reset_streams {
+            builder.max_concurrent_reset_streams(v);
+        }
+
+        let conn_res = builder.handshake(stream).await;
+        let (sender, connection) = match conn_res {
+            Ok(p) => p,
+            Err(ref err) => {
+                stats.err(format!("{err:?}"));
+                return None;
+            }
+        };
+        let conn = tokio::task::spawn(async move {
+            if let Err(err) = connection.await {
+                eprintln!("Error in connection: {}", err)
+            }
+        });
+
+        Some((sender, conn))
+    }
 }
 
 pub fn build_http_connection_legacy<B>(opts: &Options) -> Client<HttpConnector, B>
