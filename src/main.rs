@@ -27,10 +27,6 @@ fn enforce_consistency(opts: &Options) -> Result<()> {
     #[cfg(all(not(tokio_unstable), feature = "tokio_metrics"))]
     compile_error!("Tokio metrics requires tokio_unstable build!");
 
-    if opts.cps && !matches!(opts.client_type, ClientType::Hyper) {
-        return Err(anyhow!("--cps option only available with hyper client!"));
-    }
-
     #[cfg(feature = "orion_client")]
     if opts.http2_can_share && !opts.http2 {
         return Err(anyhow!(

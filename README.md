@@ -75,7 +75,6 @@ Plumbrs provides ready-to-use benchmarking tasks for several popular HTTP client
 
 - `--cps`
   Open a new connection for every request, measuring Connections Per Second (CPS).
-  Note: Available only with the `hyper` client.
 
 ## HTTP/2 options
 
