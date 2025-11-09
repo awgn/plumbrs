@@ -57,6 +57,9 @@ fn enforce_consistency(opts: &Options) -> Result<()> {
         ClientType::HyperLegacy | ClientType::Hyper1Rt if opts.host.is_some() => {
             return Err(anyhow!("Host option not available with this client!"));
         }
+        ClientType::Reqwest if !opts.trailers.is_empty() => {
+            return Err(anyhow!("Trailers not supported with reqwest client!"));
+        }
         ClientType::Help => {
             println!("Available client types:");
             println!("  hyper         - Hyper client, one per connection. Both HTTP/1 and HTTP/2");

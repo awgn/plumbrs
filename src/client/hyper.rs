@@ -10,7 +10,7 @@ use http::{Request, StatusCode};
 
 use crate::client::utils::*;
 use crate::fatal;
-use http_body_util::Full;
+use http_body_util::{BodyExt, Either, Full};
 
 pub async fn http_hyper(tid: usize, cid: usize, opts: Arc<Options>) -> Statistics {
     if opts.http2 {
@@ -38,6 +38,9 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(tid: usize, cid: usize, opt
 
     let headers = build_headers(uri.host(), opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
+
+    let trailers = build_trailers(opts.as_ref())
+        .unwrap_or_else(|e| fatal!(2, "could not build trailers: {e}"));
 
     let body = if let Some(body) = &opts.body {
         Full::new(body.clone().into())
@@ -69,7 +72,17 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(tid: usize, cid: usize, opt
             };
 
         loop {
-            let mut req = Request::new(body.clone());
+            let body = match &trailers {
+                None => {
+                    Either::Left(body.clone())
+                },
+                tr => {
+                    let trailers = tr.clone().map(Result::Ok);
+                    Either::Right(body.clone().with_trailers(std::future::ready(trailers)))
+                },
+            };
+
+            let mut req = Request::new(body);
             *req.method_mut() = opts.method.clone();
             *req.uri_mut() = uri.clone();
             *req.headers_mut() = headers.clone();

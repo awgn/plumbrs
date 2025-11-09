@@ -1,26 +1,37 @@
 use crate::Options;
+use crate::client::utils::build_trailers;
 use crate::client::utils::discard_body;
 use crate::stats::Statistics;
 
 use crate::fatal;
 use bytes::Bytes;
 use http::Request;
+use http_body_util::BodyExt;
+use http_body_util::Either;
 use http_body_util::Full;
 use hyper::StatusCode;
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::future::Ready;
 use std::sync::Arc;
 use std::time::Instant;
 
 use crate::client::utils::{build_headers, should_stop};
 
+type WithTrailersBody = http_body_util::combinators::WithTrailers<
+    Full<Bytes>,
+    Ready<Option<Result<http::HeaderMap, std::convert::Infallible>>>
+>;
+
+pub type RequestBody = Either<Full<Bytes>, WithTrailersBody>;
+
 pub async fn http_hyper_1rt(
     tid: usize,
     cid: usize,
     opts: Arc<Options>,
-    client: Client<HttpConnector, Full<Bytes>>,
+    client: Client<HttpConnector, RequestBody>,
 ) -> Statistics {
     let mut stats = Statistics {
         ok: 0,
@@ -38,10 +49,13 @@ pub async fn http_hyper_1rt(
     let headers = build_headers(Some(host), opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
 
-    let body = if let Some(body) = &opts.body {
-        Full::new(body.clone().into())
+    let trailers = build_trailers(opts.as_ref())
+        .unwrap_or_else(|e| fatal!(2, "could not build trailers: {e}"));
+
+    let body_bytes = if let Some(body) = &opts.body {
+        body.clone().into()
     } else {
-        Full::new(Bytes::new())
+        Bytes::new()
     };
 
     let start = Instant::now();
@@ -60,9 +74,16 @@ pub async fn http_hyper_1rt(
         }
 
         loop {
-            let mut req = Request::new(body.clone());
-            *req.method_mut() = opts.method.clone();
-            *req.uri_mut() = uri.clone();
+            let body: RequestBody = if let Some(tr) = trailers.clone() {
+                Either::Right(Full::new(body_bytes.clone()).with_trailers(std::future::ready(Some(Ok(tr)))))
+            } else {
+                Either::Left(Full::new(body_bytes.clone()))
+            };
+            let mut req = Request::builder()
+                .method(opts.method.clone())
+                .uri(uri.clone())
+                .body(body)
+                .unwrap();
             *req.headers_mut() = headers.clone();
 
             match client.request(req).await {

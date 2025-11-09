@@ -48,6 +48,17 @@ pub fn build_headers(
         headers.append(header::CONNECTION, HeaderValue::from_str("close")?);
     }
 
+    if !opts.trailers.is_empty() {
+        let trailers = opts
+            .trailers
+            .iter()
+            .map(|(k, _)| k.as_str())
+            .collect::<Vec<&str>>()
+            .join(", ");
+
+        headers.append("Trailer", http::HeaderValue::from_str(&trailers)?);
+    }
+
     for (k, v) in &opts.headers {
         headers.append(
             http::header::HeaderName::from_str(k)
@@ -63,6 +74,26 @@ pub fn build_headers(
     }
 
     Ok(headers)
+}
+
+pub fn build_trailers(
+    opts: &Options,
+) -> Result<Option<HeaderMap>, http::header::InvalidHeaderValue> {
+    if opts.trailers.is_empty() {
+        return Ok(None);
+    }
+
+    let mut trailers = HeaderMap::with_capacity(opts.trailers.len());
+
+    for (k, v) in &opts.trailers {
+        trailers.append(
+            http::header::HeaderName::from_str(k)
+                .unwrap_or_else(|e| fatal!(3, "invalid trailer name: {e}")),
+            HeaderValue::from_str(v).unwrap_or_else(|e| fatal!(3, "invalid trailer value: {e}")),
+        );
+    }
+
+    Ok(Some(trailers))
 }
 
 #[inline]

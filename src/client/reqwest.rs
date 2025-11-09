@@ -54,6 +54,7 @@ pub async fn http_reqwest(tid: usize, cid: usize, opts: Arc<Options>) -> Statist
         loop {
             let mut req = Request::new(opts.method.clone(), url.clone());
             *req.headers_mut() = headers.clone();
+
             if let Some(ref body) = body {
                 *req.body_mut() = Some(body.clone().into());
             }

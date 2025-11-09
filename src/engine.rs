@@ -3,7 +3,7 @@ use atomic_time::AtomicDuration;
 use atomic_time::AtomicInstant;
 use crate::client::ClientType;
 use crate::client::hyper::*;
-use crate::client::hyper_1rt::http_hyper_1rt;
+use crate::client::hyper_1rt::{http_hyper_1rt, RequestBody};
 use crate::client::hyper_h2::*;
 use crate::client::hyper_legacy::*;
 use crate::client::reqwest::*;
@@ -279,7 +279,7 @@ async fn spawn_tasks(
     let mut stats = Statistics::default();
 
     let client = if matches!(opts.client_type, ClientType::Hyper1Rt) {
-        Some(build_http_connection_legacy(&opts))
+        Some(build_http_connection_legacy::<RequestBody>(&opts))
     } else {
         None
     };

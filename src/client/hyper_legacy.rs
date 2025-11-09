@@ -2,15 +2,15 @@ use crate::stats::Statistics;
 use crate::{Options, fatal};
 
 use bytes::Bytes;
-use http::Request;
-use http_body_util::Full;
+use http::{Request};
+use http_body_util::{BodyExt, Either, Full};
 use hyper::StatusCode;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
 use crate::client::utils::{
-    build_headers, build_http_connection_legacy, discard_body, should_stop,
+    build_headers, build_http_connection_legacy, build_trailers, discard_body, should_stop,
 };
 
 pub async fn http_hyper_legacy(tid: usize, cid: usize, opts: Arc<Options>) -> Statistics {
@@ -27,8 +27,12 @@ pub async fn http_hyper_legacy(tid: usize, cid: usize, opts: Arc<Options>) -> St
         .parse::<http::Uri>()
         .unwrap_or_else(|e| fatal!(1, "invalid uri: {e}"));
     let host = uri.host().unwrap_or_else(|| fatal!(3, "host not found"));
+
     let headers = build_headers(Some(host), opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
+
+    let trailers = build_trailers(opts.as_ref())
+        .unwrap_or_else(|e| fatal!(2, "could not build trailers: {e}"));
 
     let body = if let Some(body) = &opts.body {
         Full::new(body.clone().into())
@@ -54,7 +58,17 @@ pub async fn http_hyper_legacy(tid: usize, cid: usize, opts: Arc<Options>) -> St
         let mut client = build_http_connection_legacy(&opts);
 
         loop {
-            let mut req = Request::new(body.clone());
+            let body = match &trailers {
+                None => {
+                    Either::Left(body.clone())
+                },
+                tr => {
+                    let trailers = tr.clone().map(Result::Ok);
+                    Either::Right(body.clone().with_trailers(std::future::ready(trailers)))
+                },
+            };
+
+            let mut req = Request::new(body);
             *req.method_mut() = opts.method.clone();
             *req.uri_mut() = uri.clone();
             *req.headers_mut() = headers.clone();

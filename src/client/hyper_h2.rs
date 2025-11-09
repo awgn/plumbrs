@@ -43,6 +43,9 @@ pub async fn http_hyper_h2(tid: usize, cid: usize, opts: Arc<Options>) -> Statis
     let headers = build_headers(None, opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
 
+    let trailers = build_trailers(opts.as_ref())
+        .unwrap_or_else(|e| fatal!(2, "could not build trailers: {e}"));
+
     let start = Instant::now();
     'connection: loop {
         if should_stop(total, start, &opts) {
@@ -101,7 +104,8 @@ pub async fn http_hyper_h2(tid: usize, cid: usize, opts: Arc<Options>) -> Statis
                 }
             };
 
-            let (response, mut send_stream) = match h2_client.send_request(req, false) {
+            let end_of_stream = body.is_empty() && trailers.is_none();
+            let (response, mut send_stream) = match h2_client.send_request(req, end_of_stream) {
                 Ok(r) => r,
                 Err(ref err) => {
                     stats.err(err.to_string());
@@ -111,7 +115,12 @@ pub async fn http_hyper_h2(tid: usize, cid: usize, opts: Arc<Options>) -> Statis
             };
 
             if !body.is_empty() {
-                send_stream.send_data(body.clone(), false).unwrap();
+                let end_of_stream = trailers.is_none();
+                send_stream.send_data(body.clone(), end_of_stream).unwrap();
+            }
+
+            if let Some(ref tr) = trailers {
+                send_stream.send_trailers(tr.clone()).unwrap();
             }
 
             let res = match response.await {

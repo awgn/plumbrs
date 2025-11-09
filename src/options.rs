@@ -69,6 +69,8 @@ pub struct Options {
     pub method: Method,
     #[arg(help = "HTTP headers", short = 'H', long = "header", value_parser = parse_key_val)]
     pub headers: Vec<(String, String)>,
+    #[arg(help = "HTTP trialers", short = 'T', long = "trailer", value_parser = parse_key_val)]
+    pub trailers: Vec<(String, String)>,
     #[arg(help = "Body of the request", short = 'B', long = "body")]
     pub body: Option<String>,
     #[arg(
