@@ -1,31 +1,89 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::atomic::AtomicU64};
+
+#[repr(C)]
+#[repr(align(64))]
+pub struct RealtimeStats {
+    pub ok: AtomicU64,
+    pub fail: AtomicU64,
+    pub err: AtomicU64,
+}
+
+impl Default for RealtimeStats {
+    fn default() -> Self {
+        RealtimeStats {
+            ok: AtomicU64::new(0),
+            fail: AtomicU64::new(0),
+            err: AtomicU64::new(0),
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Default, Clone)]
 pub struct Statistics {
-    pub ok: u64,
-    pub err: HashMap<String, u64>,
-    pub http_status: HashMap<u16, u64>,
-    pub idle: f64,
+    ok: u64,
+    status: HashMap<u16, u64>,
+    err: HashMap<String, u64>,
+    idle: f64,
 }
 
 impl Statistics {
     #[inline]
-    pub fn http_status(&mut self, code: hyper::StatusCode) {
+    pub fn ok(&mut self, rt: &RealtimeStats) {
+        rt.ok.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.ok += 1;
+    }
+
+    #[inline]
+    pub fn idle_time(&mut self, idle: f64) {
+        self.idle = idle;
+    }
+
+    #[inline]
+    pub fn get_http_status(&self) -> &HashMap<u16, u64> {
+        &self.status
+    }
+
+    #[inline]
+    pub fn get_errors(&self) -> &HashMap<String, u64> {
+        &self.err
+    }
+
+    #[inline]
+    pub fn http_status(&mut self, code: hyper::StatusCode, rt: &RealtimeStats) {
+        if matches!(code, hyper::StatusCode::OK) {
+            rt.ok.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.ok += 1;
+            return;
+        }
+
+        rt.fail.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
         let num = code.as_u16();
-        if let Some(val) = self.http_status.get_mut(&num) {
+        if let Some(val) = self.status.get_mut(&num) {
             *val += 1;
         } else {
-            self.http_status.insert(num, 1);
+            self.status.insert(num, 1);
         }
     }
 
     #[inline]
-    pub fn err(&mut self, kind: String) {
+    pub fn err(&mut self, kind: String, rt: &RealtimeStats) {
+        rt.err.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if let Some(val) = self.err.get_mut(&kind) {
             *val += 1;
         } else {
             self.err.insert(kind, 1);
         }
+    }
+
+    #[inline]
+    pub fn total_ok(&self) -> u64 {
+        self.ok
+    }
+
+    #[inline]
+    pub fn total_idle(&self) -> f64 {
+        self.idle
     }
 
     #[inline]
@@ -35,7 +93,7 @@ impl Statistics {
 
     #[inline]
     pub fn total_status_3xx(&self) -> u64 {
-        self.http_status
+        self.status
             .iter()
             .filter(|(code, _)| (300..400).contains(*code))
             .map(|(_, &count)| count)
@@ -44,7 +102,7 @@ impl Statistics {
 
     #[inline]
     pub fn total_status_4xx(&self) -> u64 {
-        self.http_status
+        self.status
             .iter()
             .filter(|(code, _)| (400..500).contains(*code))
             .map(|(_, &count)| count)
@@ -53,7 +111,7 @@ impl Statistics {
 
     #[inline]
     pub fn total_status_5xx(&self) -> u64 {
-        self.http_status
+        self.status
             .iter()
             .filter(|(code, _)| (500..600).contains(*code))
             .map(|(_, &count)| count)
@@ -65,8 +123,8 @@ impl std::ops::Add for Statistics {
     type Output = Statistics;
 
     fn add(self, other: Statistics) -> Statistics {
-        let mut hs = self.http_status;
-        for (key, value) in other.http_status {
+        let mut hs = self.status;
+        for (key, value) in other.status {
             if let Some(acc_value) = hs.get_mut(&key) {
                 *acc_value += value;
             } else {
@@ -86,7 +144,7 @@ impl std::ops::Add for Statistics {
         Statistics {
             ok: self.ok + other.ok,
             err: e,
-            http_status: hs,
+            status: hs,
             idle: self.idle + other.idle,
         }
     }

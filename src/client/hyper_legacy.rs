@@ -1,11 +1,11 @@
-use crate::stats::Statistics;
+use crate::stats::{RealtimeStats, Statistics};
 use crate::{Options, fatal};
 
 use bytes::Bytes;
-use http::{Request};
+use http::Request;
 use http_body_util::{BodyExt, Either, Full};
 use hyper::StatusCode;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -13,13 +13,13 @@ use crate::client::utils::{
     build_headers, build_http_connection_legacy, build_trailers, discard_body, should_stop,
 };
 
-pub async fn http_hyper_legacy(tid: usize, cid: usize, opts: Arc<Options>) -> Statistics {
-    let mut stats = Statistics {
-        ok: 0,
-        err: HashMap::new(),
-        http_status: HashMap::new(),
-        idle: 0.0,
-    };
+pub async fn http_hyper_legacy(
+    tid: usize,
+    cid: usize,
+    opts: Arc<Options>,
+    rt_stats: &RealtimeStats,
+) -> Statistics {
+    let mut statistics = Statistics::default();
     let mut total: u32 = 0;
     let mut banner = HashSet::new();
     let uri_str = opts.uri[cid % opts.uri.len()].as_str();
@@ -49,7 +49,7 @@ pub async fn http_hyper_legacy(tid: usize, cid: usize, opts: Arc<Options>) -> St
         if cid < opts.uri.len() && !banner.contains(uri_str) {
             banner.insert(uri_str.to_owned());
             println!(
-                "[{tid:>3}] hyper-legacy -> connecting to {} {}...",
+                "hyper-legacy [{tid:>2}] -> connecting to {} {}...",
                 uri,
                 if opts.http2 { "HTTP/2" } else { "HTTP/1.1" }
             );
@@ -59,13 +59,11 @@ pub async fn http_hyper_legacy(tid: usize, cid: usize, opts: Arc<Options>) -> St
 
         loop {
             let body = match &trailers {
-                None => {
-                    Either::Left(body.clone())
-                },
+                None => Either::Left(body.clone()),
                 tr => {
                     let trailers = tr.clone().map(Result::Ok);
                     Either::Right(body.clone().with_trailers(std::future::ready(trailers)))
-                },
+                }
             };
 
             let mut req = Request::new(body);
@@ -75,16 +73,16 @@ pub async fn http_hyper_legacy(tid: usize, cid: usize, opts: Arc<Options>) -> St
 
             match client.request(req).await {
                 Ok(res) => match discard_body(res).await {
-                    Ok(StatusCode::OK) => stats.ok += 1,
-                    Ok(code) => stats.http_status(code),
+                    Ok(StatusCode::OK) => statistics.ok(&rt_stats),
+                    Ok(code) => statistics.http_status(code, &rt_stats),
                     Err(err) => {
-                        stats.err(format!("{err:?}"));
+                        statistics.err(format!("{err:?}"), &rt_stats);
                         total += 1;
                         continue 'connection;
                     }
                 },
                 Err(ref err) => {
-                    stats.err(format!("{err:?}"));
+                    statistics.err(format!("{err:?}"), &rt_stats);
                     total += 1;
                     continue 'connection;
                 }
@@ -101,5 +99,5 @@ pub async fn http_hyper_legacy(tid: usize, cid: usize, opts: Arc<Options>) -> St
         }
     }
 
-    stats
+    statistics
 }

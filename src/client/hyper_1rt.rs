@@ -4,6 +4,7 @@ use crate::client::utils::discard_body;
 use crate::stats::Statistics;
 
 use crate::fatal;
+use crate::stats::RealtimeStats;
 use bytes::Bytes;
 use http::Request;
 use http_body_util::BodyExt;
@@ -12,7 +13,6 @@ use http_body_util::Full;
 use hyper::StatusCode;
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::future::Ready;
 use std::sync::Arc;
@@ -22,7 +22,7 @@ use crate::client::utils::{build_headers, should_stop};
 
 type WithTrailersBody = http_body_util::combinators::WithTrailers<
     Full<Bytes>,
-    Ready<Option<Result<http::HeaderMap, std::convert::Infallible>>>
+    Ready<Option<Result<http::HeaderMap, std::convert::Infallible>>>,
 >;
 
 pub type RequestBody = Either<Full<Bytes>, WithTrailersBody>;
@@ -32,13 +32,9 @@ pub async fn http_hyper_1rt(
     cid: usize,
     opts: Arc<Options>,
     client: Client<HttpConnector, RequestBody>,
+    rt_stats: &RealtimeStats,
 ) -> Statistics {
-    let mut stats = Statistics {
-        ok: 0,
-        err: HashMap::new(),
-        http_status: HashMap::new(),
-        idle: 0.0,
-    };
+    let mut statistics = Statistics::default();
     let mut total: u32 = 0;
     let mut banner = HashSet::new();
     let uri_str = opts.uri[cid % opts.uri.len()].as_str();
@@ -67,7 +63,7 @@ pub async fn http_hyper_1rt(
         if cid < opts.uri.len() && !banner.contains(uri_str) {
             banner.insert(uri_str.to_owned());
             println!(
-                "[{tid:>3}] hyper-legacy (1rt) -> connecting to {} {}...",
+                "hyper-1rt [{tid:>2}] -> connecting to {} {}...",
                 uri,
                 if opts.http2 { "HTTP/2" } else { "HTTP/1.1" }
             );
@@ -75,7 +71,9 @@ pub async fn http_hyper_1rt(
 
         loop {
             let body: RequestBody = if let Some(tr) = trailers.clone() {
-                Either::Right(Full::new(body_bytes.clone()).with_trailers(std::future::ready(Some(Ok(tr)))))
+                Either::Right(
+                    Full::new(body_bytes.clone()).with_trailers(std::future::ready(Some(Ok(tr)))),
+                )
             } else {
                 Either::Left(Full::new(body_bytes.clone()))
             };
@@ -88,16 +86,16 @@ pub async fn http_hyper_1rt(
 
             match client.request(req).await {
                 Ok(res) => match discard_body(res).await {
-                    Ok(StatusCode::OK) => stats.ok += 1,
-                    Ok(code) => stats.http_status(code),
+                    Ok(StatusCode::OK) => statistics.ok(&rt_stats),
+                    Ok(code) => statistics.http_status(code, &rt_stats),
                     Err(err) => {
-                        stats.err(format!("{err:?}"));
+                        statistics.err(format!("{err:?}"), &rt_stats);
                         total += 1;
                         continue 'connection;
                     }
                 },
                 Err(ref err) => {
-                    stats.err(format!("{err:?}"));
+                    statistics.err(format!("{err:?}"), &rt_stats);
                     total += 1;
                     continue 'connection;
                 }
@@ -110,5 +108,5 @@ pub async fn http_hyper_1rt(
         }
     }
 
-    stats
+    statistics
 }

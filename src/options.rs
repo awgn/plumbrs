@@ -57,19 +57,13 @@ pub struct Options {
     )]
     pub max_io_events_per_tick: Option<usize>,
     #[cfg(tokio_unstable)]
-    #[arg(
-        help = "Use Tokio alternate multi thread scheduler",
-        long = "multi-thread-alt"
-    )]
-    pub multithread_alt: bool,
-    #[cfg(tokio_unstable)]
     #[arg(help = "Disable Tokio lifo slot heuristic", long = "disable-lifo-slot")]
     pub disable_lifo_slot: bool,
     #[arg(help = "HTTP method", short = 'M', long = "method", default_value = "GET", value_parser = parse_http_method)]
     pub method: Method,
     #[arg(help = "HTTP headers", short = 'H', long = "header", value_parser = parse_key_val)]
     pub headers: Vec<(String, String)>,
-    #[arg(help = "HTTP trialers", short = 'T', long = "trailer", value_parser = parse_key_val)]
+    #[arg(help = "HTTP trailers", short = 'T', long = "trailer", value_parser = parse_key_val)]
     pub trailers: Vec<(String, String)>,
     #[arg(help = "Body of the request", short = 'B', long = "body")]
     pub body: Option<String>,

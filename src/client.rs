@@ -19,11 +19,11 @@ pub enum ClientType {
 impl std::fmt::Display for ClientType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ClientType::Reqwest => write!(f, "reqwest"),
+            ClientType::Hyper => write!(f, "hyper"),
             ClientType::HyperLegacy => write!(f, "hyper-legacy"),
             ClientType::Hyper1Rt => write!(f, "hyper-1rt"),
             ClientType::HyperH2 => write!(f, "hyper-h2"),
-            ClientType::Hyper => write!(f, "hyper"),
+            ClientType::Reqwest => write!(f, "reqwest"),
             ClientType::Help => write!(f, "help"),
         }
     }

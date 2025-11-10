@@ -136,9 +136,6 @@ The following CLI constraints are enforced at runtime:
 
 ## Feature flags
 
-- `tokio_metrics`
-  - Enables Tokio runtime metrics collection.
-  - Requires building with `tokio_unstable`. If enabled without `tokio_unstable`, the build will fail.
 - `orion_client`
   - Enables the `--http2-can-share` option (HTTP/2 connection sharing).
   - Without this feature, `--http2-can-share` is not available.
@@ -178,16 +175,6 @@ Some runtime options require Tokio’s unstable APIs. Build with:
 ```bash
 RUSTFLAGS="--cfg tokio_unstable" cargo build --release
 ```
-
-## Enabling Tokio metrics
-
-To enable Tokio metrics (and print aggregated runtime metrics), build with:
-```bash
-RUSTFLAGS="--cfg tokio_unstable" cargo build --release --features tokio_metrics
-```
-
-If `tokio_metrics` is enabled without `tokio_unstable`, the build will fail.
-
 ## Feature-gated HTTP/2 connection sharing
 
 The `--http2-can-share` option is available only when compiled with the `orion_client` feature:

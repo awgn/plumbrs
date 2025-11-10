@@ -1,7 +1,7 @@
 use crate::Options;
-use crate::stats::Statistics;
+use crate::stats::{RealtimeStats, Statistics};
 use http::header::HeaderValue;
-use http::{header, HeaderMap, Request, Response, StatusCode};
+use http::{HeaderMap, Request, Response, StatusCode, header};
 use http_body_util::BodyExt;
 use hyper::body::Body;
 use hyper::body::Incoming;
@@ -125,12 +125,16 @@ pub struct Http1;
 pub struct Http2;
 
 pub trait RequestSender<B: Body> {
-    fn send_request(&mut self, req: Request<B>) -> impl Future<Output = hyper::Result<Response<Incoming>>>;
+    fn send_request(
+        &mut self,
+        req: Request<B>,
+    ) -> impl Future<Output = hyper::Result<Response<Incoming>>>;
     fn ready(&mut self) -> impl Future<Output = hyper::Result<()>>;
 }
 
 impl<B> RequestSender<B> for conn1::SendRequest<B>
-    where B: Body + 'static
+where
+    B: Body + 'static,
 {
     async fn send_request(&mut self, req: Request<B>) -> hyper::Result<Response<Incoming>> {
         self.send_request(req).await
@@ -142,7 +146,8 @@ impl<B> RequestSender<B> for conn1::SendRequest<B>
 }
 
 impl<B> RequestSender<B> for conn2::SendRequest<B>
-    where B: Body + 'static
+where
+    B: Body + 'static,
 {
     async fn send_request(&mut self, req: Request<B>) -> hyper::Result<Response<Incoming>> {
         self.send_request(req).await
@@ -155,14 +160,15 @@ impl<B> RequestSender<B> for conn2::SendRequest<B>
 
 pub trait HttpConnectionBuilder {
     type Sender<B>: RequestSender<B>
-        where
-            B: Body + Send + Unpin + 'static,
-            B::Data: Send,
-            B::Error: Into<Box<dyn std::error::Error + Send + Sync>>;
+    where
+        B: Body + Send + Unpin + 'static,
+        B::Data: Send,
+        B::Error: Into<Box<dyn std::error::Error + Send + Sync>>;
 
     fn build_connection<B>(
         endpoint: &'static str,
         stats: &mut Statistics,
+        rt_stats: &RealtimeStats,
         _opts: &Options,
     ) -> impl Future<Output = Option<(Self::Sender<B>, tokio::task::JoinHandle<()>)>>
     where
@@ -172,15 +178,17 @@ pub trait HttpConnectionBuilder {
 }
 
 impl HttpConnectionBuilder for Http1 {
-    type Sender<B> = conn1::SendRequest<B>
-        where
-            B: Body + Send + Unpin + 'static,
-            B::Data: Send,
-            B::Error: Into<Box<dyn std::error::Error + Send + Sync>>;
+    type Sender<B>
+        = conn1::SendRequest<B>
+    where
+        B: Body + Send + Unpin + 'static,
+        B::Data: Send,
+        B::Error: Into<Box<dyn std::error::Error + Send + Sync>>;
 
     async fn build_connection<B>(
         endpoint: &'static str,
         stats: &mut Statistics,
+        rt_stats: &RealtimeStats,
         _opts: &Options,
     ) -> Option<(Self::Sender<B>, tokio::task::JoinHandle<()>)>
     where
@@ -194,7 +202,7 @@ impl HttpConnectionBuilder for Http1 {
         let stream = match stream_res {
             Ok(s) => s,
             Err(ref err) => {
-                stats.err(format!("{err:?}"));
+                stats.err(format!("{err:?}"), &rt_stats);
                 return None;
             }
         };
@@ -204,7 +212,7 @@ impl HttpConnectionBuilder for Http1 {
         let (sender, connection) = match conn_res {
             Ok(p) => p,
             Err(ref err) => {
-                stats.err(format!("{err:?}"));
+                stats.err(format!("{err:?}"), &rt_stats);
                 return None;
             }
         };
@@ -219,15 +227,17 @@ impl HttpConnectionBuilder for Http1 {
 }
 
 impl HttpConnectionBuilder for Http2 {
-    type Sender<B> = conn2::SendRequest<B>
-        where
-            B: Body + Send + 'static + Unpin,
-            B::Data: Send,
-            B::Error: Into<Box<dyn std::error::Error + Send + Sync>>;
+    type Sender<B>
+        = conn2::SendRequest<B>
+    where
+        B: Body + Send + 'static + Unpin,
+        B::Data: Send,
+        B::Error: Into<Box<dyn std::error::Error + Send + Sync>>;
 
     async fn build_connection<B>(
         endpoint: &'static str,
         stats: &mut Statistics,
+        rt_stats: &RealtimeStats,
         opts: &Options,
     ) -> Option<(Self::Sender<B>, tokio::task::JoinHandle<()>)>
     where
@@ -241,7 +251,7 @@ impl HttpConnectionBuilder for Http2 {
         let stream = match stream_res {
             Ok(s) => s,
             Err(ref err) => {
-                stats.err(format!("{err:?}"));
+                stats.err(format!("{err:?}"), &rt_stats);
                 return None;
             }
         };
@@ -262,7 +272,7 @@ impl HttpConnectionBuilder for Http2 {
         let (sender, connection) = match conn_res {
             Ok(p) => p,
             Err(ref err) => {
-                stats.err(format!("{err:?}"));
+                stats.err(format!("{err:?}"), &rt_stats);
                 return None;
             }
         };
@@ -277,7 +287,7 @@ impl HttpConnectionBuilder for Http2 {
 }
 
 pub fn build_http_connection_legacy<B>(opts: &Options) -> Client<HttpConnector, B>
-    where
+where
     B: Body + Send + 'static,
     B::Data: Send,
     B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,

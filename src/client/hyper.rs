@@ -1,7 +1,7 @@
 use crate::Options;
-use crate::stats::Statistics;
+use crate::stats::{RealtimeStats, Statistics};
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -12,21 +12,26 @@ use crate::client::utils::*;
 use crate::fatal;
 use http_body_util::{BodyExt, Either, Full};
 
-pub async fn http_hyper(tid: usize, cid: usize, opts: Arc<Options>) -> Statistics {
+pub async fn http_hyper(
+    tid: usize,
+    cid: usize,
+    opts: Arc<Options>,
+    rt_stats: &RealtimeStats,
+) -> Statistics {
     if opts.http2 {
-        http_hyper_client::<Http2>(tid, cid, opts).await
+        http_hyper_client::<Http2>(tid, cid, opts, rt_stats).await
     } else {
-        http_hyper_client::<Http1>(tid, cid, opts).await
+        http_hyper_client::<Http1>(tid, cid, opts, rt_stats).await
     }
 }
 
-async fn http_hyper_client<B: HttpConnectionBuilder>(tid: usize, cid: usize, opts: Arc<Options>) -> Statistics {
-    let mut stats = Statistics {
-        ok: 0,
-        err: HashMap::new(),
-        http_status: HashMap::new(),
-        idle: 0.0,
-    };
+async fn http_hyper_client<B: HttpConnectionBuilder>(
+    tid: usize,
+    cid: usize,
+    opts: Arc<Options>,
+    rt_stats: &RealtimeStats,
+) -> Statistics {
+    let mut statistics = Statistics::default();
     let mut total: u32 = 0;
     let mut banner = HashSet::new();
     let uri_str = opts.uri[cid % opts.uri.len()].as_str();
@@ -57,13 +62,13 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(tid: usize, cid: usize, opt
         if cid < opts.uri.len() && !banner.contains(uri_str) {
             banner.insert(uri_str.to_owned());
             println!(
-                "[{tid:>3}] hyper -> connecting to {}:{}, uri = {} HTTP/1.1...",
+                "hyper [{tid:>2}] -> connecting to {}:{}, uri = {} HTTP/1.1...",
                 host, port, uri
             );
         }
 
         let (mut sender, mut conn_task) =
-            match B::build_connection(endpoint, &mut stats, &opts).await {
+            match B::build_connection(endpoint, &mut statistics, &rt_stats, &opts).await {
                 Some(s) => s,
                 None => {
                     total += 1;
@@ -73,13 +78,11 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(tid: usize, cid: usize, opt
 
         loop {
             let body = match &trailers {
-                None => {
-                    Either::Left(body.clone())
-                },
+                None => Either::Left(body.clone()),
                 tr => {
                     let trailers = tr.clone().map(Result::Ok);
                     Either::Right(body.clone().with_trailers(std::future::ready(trailers)))
-                },
+                }
             };
 
             let mut req = Request::new(body);
@@ -89,22 +92,23 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(tid: usize, cid: usize, opt
 
             match sender.send_request(req).await {
                 Ok(res) => match discard_body(res).await {
-                    Ok(StatusCode::OK) => stats.ok += 1,
-                    Ok(code) => stats.http_status(code),
+                    Ok(StatusCode::OK) => statistics.ok(&rt_stats),
+                    Ok(code) => statistics.http_status(code, &rt_stats),
                     Err(err) => {
-                        stats.err(format!("{err:?}"));
+                        statistics.err(format!("{err:?}"), &rt_stats);
                         total += 1;
                         continue 'connection;
                     }
                 },
                 Err(ref err) => {
-                    stats.err(format!("{err:?}"));
+                    statistics.err(format!("{err:?}"), &rt_stats);
                     total += 1;
                     continue 'connection;
                 }
             }
 
             total += 1;
+
             if should_stop(total, start, &opts) {
                 break 'connection;
             }
@@ -112,7 +116,7 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(tid: usize, cid: usize, opt
             if opts.cps {
                 conn_task.abort();
                 (sender, conn_task) =
-                    match B::build_connection(endpoint, &mut stats, &opts).await {
+                    match B::build_connection(endpoint, &mut statistics, &rt_stats, &opts).await {
                         Some(s) => s,
                         None => {
                             total += 1;
@@ -122,11 +126,11 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(tid: usize, cid: usize, opt
             } else {
                 let res = sender.ready().await;
                 if let Err(ref err) = res {
-                    stats.err(format!("{err:?}"));
+                    statistics.err(format!("{err:?}"), &rt_stats);
                 }
             }
         }
     }
 
-    stats
+    statistics
 }

@@ -2,9 +2,9 @@ use crate::fatal;
 use crate::stats::Statistics;
 
 use crate::Options;
+use crate::stats::RealtimeStats;
 
 use bytes::Bytes;
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
@@ -17,13 +17,13 @@ use crate::client::utils::*;
 
 use h2;
 
-pub async fn http_hyper_h2(tid: usize, cid: usize, opts: Arc<Options>) -> Statistics {
-    let mut stats = Statistics {
-        ok: 0,
-        err: HashMap::new(),
-        http_status: HashMap::new(),
-        idle: 0.0,
-    };
+pub async fn http_hyper_h2(
+    tid: usize,
+    cid: usize,
+    opts: Arc<Options>,
+    rt_stats: &RealtimeStats,
+) -> Statistics {
+    let mut statistics = Statistics::default();
     let mut total: u32 = 0;
     let mut banner = HashSet::new();
     let uri_str = opts.uri[cid % opts.uri.len()].as_str();
@@ -55,7 +55,7 @@ pub async fn http_hyper_h2(tid: usize, cid: usize, opts: Arc<Options>) -> Statis
         if cid < opts.uri.len() && !banner.contains(uri_str) {
             banner.insert(uri_str.to_owned());
             println!(
-                "[{tid:>3}] hyper-h2 -> connecting to {}:{}, uri= {} HTTP/2...",
+                "hyper-h2 [{tid:>2}] -> connecting to {}:{}, uri= {} HTTP/2...",
                 host, port, uri
             );
         }
@@ -66,7 +66,7 @@ pub async fn http_hyper_h2(tid: usize, cid: usize, opts: Arc<Options>) -> Statis
         let mut stream = match stream_res {
             Ok(s) => s,
             Err(ref err) => {
-                stats.err(format!("{err:?}"));
+                statistics.err(format!("{err:?}"), &rt_stats);
                 total += 1;
                 continue 'connection;
             }
@@ -78,7 +78,7 @@ pub async fn http_hyper_h2(tid: usize, cid: usize, opts: Arc<Options>) -> Statis
         let (mut h2_client, mut connection) = match conn {
             Ok(h2_conn) => h2_conn,
             Err(ref err) => {
-                stats.err(format!("{err:?}"));
+                statistics.err(format!("{err:?}"), &rt_stats);
                 total += 1;
                 continue 'connection;
             }
@@ -99,7 +99,7 @@ pub async fn http_hyper_h2(tid: usize, cid: usize, opts: Arc<Options>) -> Statis
             h2_client = match h2_client.ready().await {
                 Ok(h2) => h2,
                 Err(ref err) => {
-                    stats.err(format!("{err:?}"));
+                    statistics.err(format!("{err:?}"), &rt_stats);
                     continue 'connection;
                 }
             };
@@ -108,7 +108,7 @@ pub async fn http_hyper_h2(tid: usize, cid: usize, opts: Arc<Options>) -> Statis
             let (response, mut send_stream) = match h2_client.send_request(req, end_of_stream) {
                 Ok(r) => r,
                 Err(ref err) => {
-                    stats.err(err.to_string());
+                    statistics.err(err.to_string(), &rt_stats);
                     total += 1;
                     continue 'connection;
                 }
@@ -126,7 +126,7 @@ pub async fn http_hyper_h2(tid: usize, cid: usize, opts: Arc<Options>) -> Statis
             let res = match response.await {
                 Ok(res) => res,
                 Err(ref err) => {
-                    stats.err(format!("{err:?}"));
+                    statistics.err(format!("{err:?}"), &rt_stats);
                     total += 1;
                     continue 'connection;
                 }
@@ -134,13 +134,13 @@ pub async fn http_hyper_h2(tid: usize, cid: usize, opts: Arc<Options>) -> Statis
 
             match res.status() {
                 StatusCode::OK => {
-                    stats.ok += 1;
+                    statistics.ok(&rt_stats);
                     let (_head, mut body) = res.into_parts();
                     while let Some(chunk_res) = body.data().await {
                         let chunk_len = match chunk_res {
                             Ok(ref c) => c.len(),
                             Err(ref err) => {
-                                stats.err(format!("{err:?}"));
+                                statistics.err(format!("{err:?}"), &rt_stats);
                                 total += 1;
                                 continue 'connection;
                             }
@@ -149,7 +149,7 @@ pub async fn http_hyper_h2(tid: usize, cid: usize, opts: Arc<Options>) -> Statis
                         let _ = body.flow_control().release_capacity(chunk_len);
                     }
                 }
-                code => stats.http_status(code),
+                code => statistics.http_status(code, &rt_stats),
             }
 
             total += 1;
@@ -165,7 +165,7 @@ pub async fn http_hyper_h2(tid: usize, cid: usize, opts: Arc<Options>) -> Statis
                 stream = match stream_res {
                     Ok(s) => s,
                     Err(ref err) => {
-                        stats.err(format!("{err:?}"));
+                        statistics.err(format!("{err:?}"), &rt_stats);
                         total += 1;
                         continue 'connection;
                     }
@@ -176,7 +176,7 @@ pub async fn http_hyper_h2(tid: usize, cid: usize, opts: Arc<Options>) -> Statis
                 (h2_client, connection) = match conn {
                     Ok(h2_conn) => h2_conn,
                     Err(ref err) => {
-                        stats.err(format!("{err:?}"));
+                        statistics.err(format!("{err:?}"), &rt_stats);
                         total += 1;
                         continue 'connection;
                     }
@@ -191,5 +191,5 @@ pub async fn http_hyper_h2(tid: usize, cid: usize, opts: Arc<Options>) -> Statis
         }
     }
 
-    stats
+    statistics
 }

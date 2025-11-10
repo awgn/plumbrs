@@ -1,21 +1,21 @@
-use crate::stats::Statistics;
+use crate::stats::{RealtimeStats, Statistics};
 use crate::{Options, fatal};
 
 use http::{HeaderMap, StatusCode};
 
 use crate::client::utils::{build_headers, should_stop};
 use reqwest::{Client, ClientBuilder, Request, Result, Url};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
-pub async fn http_reqwest(tid: usize, cid: usize, opts: Arc<Options>) -> Statistics {
-    let mut stats = Statistics {
-        ok: 0,
-        err: HashMap::new(),
-        http_status: HashMap::new(),
-        idle: 0.0,
-    };
+pub async fn http_reqwest(
+    tid: usize,
+    cid: usize,
+    opts: Arc<Options>,
+    rt_stats: &RealtimeStats,
+) -> Statistics {
+    let mut statistics = Statistics::default();
     let mut total: u32 = 0;
     let mut banner = HashSet::new();
     let uri_str = opts.uri[cid % opts.uri.len()].as_str();
@@ -38,7 +38,7 @@ pub async fn http_reqwest(tid: usize, cid: usize, opts: Arc<Options>) -> Statist
         if cid < opts.uri.len() && !banner.contains(uri_str) {
             banner.insert(uri_str.to_owned());
             println!(
-                "[{tid:>3}] reqwest -> connecting to {} {}...",
+                "reqwest [{tid:>2}] -> connecting to {} {}...",
                 url,
                 if opts.http2 { "HTTP/2" } else { "HTTP/1.1" }
             );
@@ -62,13 +62,13 @@ pub async fn http_reqwest(tid: usize, cid: usize, opts: Arc<Options>) -> Statist
                 Ok(res) => {
                     let code = res.status();
                     if matches!(code, StatusCode::OK) {
-                        stats.ok += 1;
+                        statistics.ok(&rt_stats);
                     } else {
-                        stats.http_status(code);
+                        statistics.http_status(code, &rt_stats);
                     }
                 }
                 Err(ref err) => {
-                    stats.err(format!("{err:?}"));
+                    statistics.err(format!("{err:?}"), &rt_stats);
                     total += 1;
                     continue 'connection;
                 }
@@ -90,7 +90,7 @@ pub async fn http_reqwest(tid: usize, cid: usize, opts: Arc<Options>) -> Statist
         }
     }
 
-    stats
+    statistics
 }
 
 pub fn build_http_client(opts: &Options, headers: &HeaderMap) -> Result<Client> {

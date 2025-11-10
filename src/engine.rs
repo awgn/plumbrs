@@ -8,19 +8,21 @@ use crate::client::hyper_h2::*;
 use crate::client::hyper_legacy::*;
 use crate::client::reqwest::*;
 use crate::client::utils::build_http_connection_legacy;
+use crate::stats::RealtimeStats;
 use crate::stats::Statistics;
 
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
+use std::sync::atomic::AtomicBool;
 
+use scopeguard::defer;
 use tokio::runtime::Builder;
 use tokio::task::JoinSet;
+use crossterm::{cursor, execute, terminal};
 
-pub mod metrics;
 use anyhow::Result;
-use metrics::AggRuntimeMetrics;
 use std::sync::atomic::Ordering;
 
 pub fn run_tokio_engines(opts: Options) -> Result<()> {
@@ -39,12 +41,18 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
         opts.connections / opts.threads
     );
 
+    let mut runtime_stats: Vec<RealtimeStats> = Vec::with_capacity(instances);
+    runtime_stats.resize_with(instances, Default::default);
+    let stats = Arc::new(runtime_stats);
+
     let start = Instant::now();
+
     for i in 0..instances {
         let mut opts = opts.clone();
+        let stats = stats.clone();
         opts.connections /= instances; // number of connection per engine
-        let handle = thread::spawn(move || -> Result<(Statistics, Option<AggRuntimeMetrics>)> {
-            runtime_engine(i, opts)
+        let handle = thread::spawn(move || -> Result<Statistics> {
+            runtime_engine(i, opts, stats)
         });
 
         handles.push(handle);
@@ -54,44 +62,81 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
     let out = coll.collect::<Result<Vec<_>, _>>()?;
     let duration = start.elapsed().as_micros() as u64;
 
-    let (total, metrics) = out.into_iter().fold(
-        (Statistics::default(), Some(AggRuntimeMetrics::default())),
-        |(acc_s, acc_m), (s, m)| {
-            let m = match (acc_m, m) {
-                (Some(acc_m), Some(m)) => Some(acc_m + m),
-                _ => None,
-            };
-            (acc_s + s, m)
+    let total = out.into_iter().fold(
+        Statistics::default(),
+        |acc_s,s| {
+            acc_s + s
         },
     );
 
-    println!(
-        "Stats: ok:{} err:{}, 3xx:{}, 4xx:{}, 5xx:{}, idle:{:.2}%",
-        total.ok,
-        total.total_errors(),
-        total.total_status_3xx(),
-        total.total_status_4xx(),
-        total.total_status_5xx(),
-        total.idle / (opts.threads as f64) * 100.0
+    println!("\n─────────────────────────────────────────────────────────────────");
+
+    let total_ok = total.total_ok();
+    let total_3xx = total.total_status_3xx();
+    let total_4xx = total.total_status_4xx();
+    let total_5xx = total.total_status_5xx();
+    let total_err = total.total_errors();
+    let idle_perc = total.total_idle() / (opts.threads as f64) * 100.0;
+
+    // Total statistics
+    println!(" Total:   okay:{:<10}  3xx:{:<10}  4xx:{:<10}  5xx:{:<10} ",
+        total_ok,
+        total_3xx,
+        total_4xx,
+        total_5xx,
     );
 
-    println!("OK: {}/sec", total.ok * 1000000 / duration);
-    for (key, total_value) in total.http_status {
-        println!("HTTP {}: {}/sec", key, total_value * 1000000 / duration);
+    // HTTP status codes summary
+    println!("          err:{:<10}   %idle:{:<10} ",
+        total_err,
+        idle_perc
+    );
+
+    // Throughput
+    let ok_sec = total.total_ok() * 1000000 / duration;
+
+    // HTTP status codes details
+    println!("─────────────────────────────────────────────────────────────────");
+    println!(" Details:                                                        ");
+    if total_ok > 0 {
+        println!("   200:   total:{:<10} rate/sec:{:<10}", total_ok, ok_sec);
     }
 
-    for (key, total_value) in total.err {
-        println!("{:?}: {}/sec", key, total_value * 1000000 / duration);
+    let http_statuses: Vec<_> = total.get_http_status().iter().collect();
+    if !http_statuses.is_empty() {
+        for (key, total_value) in http_statuses {
+            let total_value = total_value;
+            let per_sec = total_value * 1000000 / duration;
+            println!("   {key}:   total:{:<10} rate/sec:{:<10}", total_value, per_sec);
+        }
     }
 
-    if let Some(metrics) = metrics {
-        println!("Tokio Metrics: {:#?}", metrics);
+    // Errors
+    let errors: Vec<_> = total.get_errors().iter().collect();
+    if !errors.is_empty() {
+        println!("─────────────────────────────────────────────────────────────────");
+        println!(" Errors:                                                         ");
+        for (key, total_value) in errors {
+            let per_sec = *total_value * 1000000 / duration;
+            let error_str = format!("{:?}", key);
+            if error_str.len() > 42 {
+                println!("   {}... {:>10} req/sec", &error_str[..42], per_sec);
+            } else {
+                println!("   {:<42} {:>10} req/sec", error_str, per_sec);
+            }
+        }
     }
+
+    println!("─────────────────────────────────────────────────────────────────");
 
     Ok(())
 }
 
-fn runtime_engine(id: usize, opts: Options) -> Result<(Statistics, Option<AggRuntimeMetrics>)> {
+fn runtime_engine(
+    id: usize,
+    opts: Options,
+    stats: Arc<Vec<RealtimeStats>>,
+) -> Result<Statistics> {
     let opts = Arc::new(opts);
     let start = Instant::now();
     let park_time = Arc::new(AtomicInstant::new(start));
@@ -110,8 +155,8 @@ fn runtime_engine(id: usize, opts: Options) -> Result<(Statistics, Option<AggRun
 
         Some(num_threads) => {
             #[cfg(tokio_unstable)]
-            match (opts.multithread_alt, opts.disable_lifo_slot) {
-                (true, true) => Builder::new_multi_thread_alt()
+            match opts.disable_lifo_slot {
+                true => Builder::new_multi_thread()
                     .disable_lifo_slot()
                     .enable_all()
                     .worker_threads(num_threads)
@@ -139,62 +184,7 @@ fn runtime_engine(id: usize, opts: Options) -> Result<(Statistics, Option<AggRun
                     .build()
                     .unwrap(),
 
-                (true, false) => Builder::new_multi_thread_alt()
-                    .enable_all()
-                    .worker_threads(num_threads)
-                    .global_queue_interval(opts.global_queue_interval.unwrap_or(61))
-                    .event_interval(opts.event_interval.unwrap_or(61))
-                    .max_io_events_per_tick(opts.max_io_events_per_tick.unwrap_or(1024))
-                    .thread_name(format!("plumbr-{}/m", id))
-                    .on_thread_park({
-                        let park_time = Arc::clone(&park_time);
-                        move || {
-                            park_time.store(Instant::now(), Ordering::Relaxed);
-                        }
-                    })
-                    .on_thread_unpark({
-                        let park_time = Arc::clone(&park_time);
-                        let total_park_time = Arc::clone(&total_park_time);
-                        move || {
-                            let delta = Instant::now() - park_time.load(Ordering::Relaxed);
-                            total_park_time.store(
-                                total_park_time.load(Ordering::Relaxed) + delta,
-                                Ordering::Relaxed,
-                            );
-                        }
-                    })
-                    .build()
-                    .unwrap(),
-
-                (false, true) => Builder::new_multi_thread()
-                    .disable_lifo_slot()
-                    .enable_all()
-                    .worker_threads(num_threads)
-                    .global_queue_interval(opts.global_queue_interval.unwrap_or(61))
-                    .event_interval(opts.event_interval.unwrap_or(61))
-                    .max_io_events_per_tick(opts.max_io_events_per_tick.unwrap_or(1024))
-                    .thread_name(format!("plumbr-{}/m", id))
-                    .on_thread_park({
-                        let park_time = Arc::clone(&park_time);
-                        move || {
-                            park_time.store(Instant::now(), Ordering::Relaxed);
-                        }
-                    })
-                    .on_thread_unpark({
-                        let park_time = Arc::clone(&park_time);
-                        let total_park_time = Arc::clone(&total_park_time);
-                        move || {
-                            let delta = Instant::now() - park_time.load(Ordering::Relaxed);
-                            total_park_time.store(
-                                total_park_time.load(Ordering::Relaxed) + delta,
-                                Ordering::Relaxed,
-                            );
-                        }
-                    })
-                    .build()
-                    .unwrap(),
-
-                (false, false) => Builder::new_multi_thread()
+                false => Builder::new_multi_thread()
                     .enable_all()
                     .worker_threads(num_threads)
                     .global_queue_interval(opts.global_queue_interval.unwrap_or(61))
@@ -254,29 +244,22 @@ fn runtime_engine(id: usize, opts: Options) -> Result<(Statistics, Option<AggRun
 
     // spawn tasks...
 
-    let (mut stats, metrics) = runtime.block_on(async { spawn_tasks(id, opts).await });
+    let mut stats = runtime.block_on(async { spawn_tasks(id, opts, stats).await });
 
-    stats.idle =
-        total_park_time.load(Ordering::Relaxed).as_secs_f64() / start.elapsed().as_secs_f64();
-    Ok((stats, metrics))
+    stats.idle_time(
+        total_park_time.load(Ordering::Relaxed).as_secs_f64() / start.elapsed().as_secs_f64(),
+    );
+
+    Ok(stats)
 }
 
 async fn spawn_tasks(
     id: usize,
     opts: Arc<Options>,
-) -> (Statistics, Option<metrics::AggRuntimeMetrics>) {
-    #[cfg(all(tokio_unstable, feature = "tokio_metrics"))]
-    let mut metrics_iter = {
-        let handle = tokio::runtime::Handle::current();
-        let runtime_monitor = tokio_metrics::RuntimeMonitor::new(&handle);
-        runtime_monitor.intervals()
-    };
-
-    #[cfg(not(feature = "tokio_metrics"))]
-    let mut metrics_iter = metrics::DummyMetricsIter;
-
+    rt_stats: Arc<Vec<RealtimeStats>>,
+) -> Statistics {
     let mut tasks = JoinSet::new();
-    let mut stats = Statistics::default();
+    let mut statistics = Statistics::default();
 
     let client = if matches!(opts.client_type, ClientType::Hyper1Rt) {
         Some(build_http_connection_legacy::<RequestBody>(&opts))
@@ -284,35 +267,50 @@ async fn spawn_tasks(
         None
     };
 
+    let shutdown = Arc::new(AtomicBool::new(false));
+
+    // Handle Ctrl+C to restore cursor
+    let shutdown_clone = Arc::clone(&shutdown);
+    let ctrl_c_handle = tokio::spawn(async move {
+        tokio::signal::ctrl_c().await.ok();
+        shutdown_clone.store(true, Ordering::Relaxed);
+        // Restore cursor on Ctrl+C
+        let _ = execute!(std::io::stdout(), cursor::Show);
+        println!();
+        std::process::exit(0);
+    });
+
+    let meter_handle = tokio::spawn(meter(Arc::clone(&rt_stats)));
     for con in 0..opts.connections {
         let opts = Arc::clone(&opts);
+        let stats = Arc::clone(&rt_stats);
 
         match opts.client_type {
             ClientType::Hyper => {
-                tasks.spawn(async move { http_hyper(id, con, opts).await });
+                tasks.spawn(async move { http_hyper(id, con, opts, &stats[id]).await });
             }
             ClientType::HyperLegacy => {
-                tasks.spawn(async move { http_hyper_legacy(id, con, opts).await });
+                tasks.spawn(async move { http_hyper_legacy(id, con, opts, &stats[id]).await });
             }
             ClientType::Hyper1Rt => {
                 let con_client = client.as_ref().unwrap().clone();
-                tasks.spawn(async move { http_hyper_1rt(id, con, opts, con_client).await });
+                tasks.spawn(
+                    async move { http_hyper_1rt(id, con, opts, con_client, &stats[id]).await },
+                );
             }
             ClientType::HyperH2 => {
-                tasks.spawn(async move { http_hyper_h2(id, con, opts).await });
+                tasks.spawn(async move { http_hyper_h2(id, con, opts, &stats[id]).await });
             }
             ClientType::Reqwest => {
-                tasks.spawn(async move { http_reqwest(id, con, opts).await });
+                tasks.spawn(async move { http_reqwest(id, con, opts, &stats[id]).await });
             }
             ClientType::Help => (),
         }
     }
 
-    let mut tmp = stats.clone();
-
     while let Some(res) = tasks.join_next().await {
         match res {
-            Ok(stats) => tmp = tmp + stats,
+            Ok(s) => statistics = statistics + s,
             Err(err) => {
                 if opts.verbose {
                     eprintln!("Unable to join task: {}", err);
@@ -321,7 +319,39 @@ async fn spawn_tasks(
         }
     }
 
-    stats = tmp;
+    meter_handle.abort();
+    ctrl_c_handle.abort();
 
-    (stats, metrics_iter.next())
+    statistics
+}
+
+pub async fn meter(rt_stats: Arc<Vec<RealtimeStats>>) {
+    const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    let mut spinner_idx = 0;
+
+    // Hide cursor and ensure it's restored on exit
+    let _ = execute!(std::io::stdout(), cursor::Hide);
+
+    defer! {
+        let _ = execute!(std::io::stdout(), cursor::Show);
+    }
+
+    loop {
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+        let mut total_ok = 0u64;
+        let mut total_err = 0u64;
+        let mut total_fail = 0u64;
+
+        for stats in rt_stats.iter() {
+            total_ok = stats.ok.swap(0, Ordering::Relaxed) as u64;
+            total_err = stats.err.swap(0, Ordering::Relaxed) as u64;
+            total_fail = stats.fail.swap(0, Ordering::Relaxed) as u64;
+        }
+
+        print!("\r{} Stats: ok: {total_ok}/sec, fail: {total_fail}/sec, err: {total_err}/sec",
+               SPINNER[spinner_idx]);
+        let _ = execute!(std::io::stdout(), terminal::Clear(terminal::ClearType::UntilNewLine));
+
+        spinner_idx = (spinner_idx + 1) % SPINNER.len();
+    }
 }

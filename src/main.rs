@@ -24,9 +24,6 @@ fn main() -> Result<()> {
 }
 
 fn enforce_consistency(opts: &Options) -> Result<()> {
-    #[cfg(all(not(tokio_unstable), feature = "tokio_metrics"))]
-    compile_error!("Tokio metrics requires tokio_unstable build!");
-
     #[cfg(feature = "orion_client")]
     if opts.http2_can_share && !opts.http2 {
         return Err(anyhow!(
