@@ -15,7 +15,6 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
-use std::sync::atomic::AtomicBool;
 
 use scopeguard::defer;
 use tokio::runtime::Builder;
@@ -43,16 +42,38 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
 
     let mut runtime_stats: Vec<RealtimeStats> = Vec::with_capacity(instances);
     runtime_stats.resize_with(instances, Default::default);
-    let stats = Arc::new(runtime_stats);
+    let rt_stats = Arc::new(runtime_stats);
 
     let start = Instant::now();
 
-    for i in 0..instances {
+    // spawn tasks...
+    let meters = Builder::new_multi_thread()
+        .enable_all()
+        .worker_threads(1)
+        .build()
+        .unwrap();
+
+    let clone_stats = Arc::clone(&rt_stats);
+    meters.spawn(async move {
+        let ctrl_c_handle = tokio::spawn(async move {
+            tokio::signal::ctrl_c().await.ok();
+            // Restore cursor on Ctrl+C
+            let _ = execute!(std::io::stdout(), cursor::Show);
+            println!();
+            std::process::exit(0);
+        });
+
+        meter(clone_stats).await;
+
+        ctrl_c_handle.abort();
+    });
+
+    for id in 0..instances {
         let mut opts = opts.clone();
-        let stats = stats.clone();
+        let stats = rt_stats.clone();
         opts.connections /= instances; // number of connection per engine
         let handle = thread::spawn(move || -> Result<Statistics> {
-            runtime_engine(i, opts, stats)
+            runtime_engine(id, opts, stats)
         });
 
         handles.push(handle);
@@ -135,7 +156,7 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
 fn runtime_engine(
     id: usize,
     opts: Options,
-    stats: Arc<Vec<RealtimeStats>>,
+    rt_stats: Arc<Vec<RealtimeStats>>,
 ) -> Result<Statistics> {
     let opts = Arc::new(opts);
     let start = Instant::now();
@@ -242,9 +263,7 @@ fn runtime_engine(
         }
     };
 
-    // spawn tasks...
-
-    let mut stats = runtime.block_on(async { spawn_tasks(id, opts, stats).await });
+    let mut stats = runtime.block_on(async { spawn_tasks(id, opts, rt_stats).await });
 
     stats.idle_time(
         total_park_time.load(Ordering::Relaxed).as_secs_f64() / start.elapsed().as_secs_f64(),
@@ -267,20 +286,6 @@ async fn spawn_tasks(
         None
     };
 
-    let shutdown = Arc::new(AtomicBool::new(false));
-
-    // Handle Ctrl+C to restore cursor
-    let shutdown_clone = Arc::clone(&shutdown);
-    let ctrl_c_handle = tokio::spawn(async move {
-        tokio::signal::ctrl_c().await.ok();
-        shutdown_clone.store(true, Ordering::Relaxed);
-        // Restore cursor on Ctrl+C
-        let _ = execute!(std::io::stdout(), cursor::Show);
-        println!();
-        std::process::exit(0);
-    });
-
-    let meter_handle = tokio::spawn(meter(Arc::clone(&rt_stats)));
     for con in 0..opts.connections {
         let opts = Arc::clone(&opts);
         let stats = Arc::clone(&rt_stats);
@@ -319,9 +324,6 @@ async fn spawn_tasks(
         }
     }
 
-    meter_handle.abort();
-    ctrl_c_handle.abort();
-
     statistics
 }
 
@@ -343,9 +345,9 @@ pub async fn meter(rt_stats: Arc<Vec<RealtimeStats>>) {
         let mut total_fail = 0u64;
 
         for stats in rt_stats.iter() {
-            total_ok = stats.ok.swap(0, Ordering::Relaxed) as u64;
-            total_err = stats.err.swap(0, Ordering::Relaxed) as u64;
-            total_fail = stats.fail.swap(0, Ordering::Relaxed) as u64;
+            total_ok += stats.ok.swap(0, Ordering::Relaxed) as u64;
+            total_err += stats.err.swap(0, Ordering::Relaxed) as u64;
+            total_fail += stats.fail.swap(0, Ordering::Relaxed) as u64;
         }
 
         print!("\r{} Stats: ok: {total_ok}/sec, fail: {total_fail}/sec, err: {total_err}/sec",
