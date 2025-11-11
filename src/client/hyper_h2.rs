@@ -23,7 +23,7 @@ pub async fn http_hyper_h2(
     opts: Arc<Options>,
     rt_stats: &RealtimeStats,
 ) -> Statistics {
-    let mut statistics = Statistics::default();
+    let mut statistics = Statistics::new(opts.latency);
     let mut total: u32 = 0;
     let mut banner = HashSet::new();
     let uri_str = opts.uri[cid % opts.uri.len()].as_str();
@@ -105,6 +105,9 @@ pub async fn http_hyper_h2(
             };
 
             let end_of_stream = body.is_empty() && trailers.is_none();
+
+            let start_lat = opts.latency.then_some(Instant::now());
+
             let (response, mut send_stream) = match h2_client.send_request(req, end_of_stream) {
                 Ok(r) => r,
                 Err(ref err) => {
@@ -151,6 +154,10 @@ pub async fn http_hyper_h2(
                 }
                 code => statistics.http_status(code, &rt_stats),
             }
+
+            if let Some(start_lat) = start_lat && let Some(hist) = &mut statistics.latency {
+                hist.record(start_lat.elapsed().as_micros() as u64).ok();
+            };
 
             total += 1;
 

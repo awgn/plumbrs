@@ -1,5 +1,7 @@
 use std::{collections::HashMap, sync::atomic::AtomicU64};
 
+use hdrhistogram::Histogram;
+
 #[repr(C)]
 #[repr(align(64))]
 pub struct RealtimeStats {
@@ -24,9 +26,24 @@ pub struct Statistics {
     status: HashMap<u16, u64>,
     err: HashMap<String, u64>,
     idle: f64,
+    pub latency: Option<Histogram<u64>>,
 }
 
 impl Statistics {
+    pub fn new(with_latency: bool) -> Self {
+        Statistics {
+            ok: 0,
+            status: HashMap::new(),
+            err: HashMap::new(),
+            idle: 0.0,
+            latency: if with_latency {
+                Some(Histogram::<u64>::new_with_bounds(1, 1000000, 3).expect("failed to create histogram"))
+            } else {
+                None
+            }
+        }
+    }
+
     #[inline]
     pub fn ok(&mut self, rt: &RealtimeStats) {
         rt.ok.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -146,6 +163,13 @@ impl std::ops::Add for Statistics {
             err: e,
             status: hs,
             idle: self.idle + other.idle,
+            latency: match (self.latency, other.latency) {
+                (Some(h1), Some(h2)) => {
+                    Some(h1.add(&h2))
+                }
+                (Some(h), None) | (None, Some(h)) => Some(h),
+                (None, None) => None,
+            },
         }
     }
 }

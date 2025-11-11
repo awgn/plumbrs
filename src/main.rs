@@ -44,14 +44,14 @@ fn enforce_consistency(opts: &Options) -> Result<()> {
     match opts.client_type {
         ClientType::HyperLegacy
         | ClientType::Hyper
-        | ClientType::Hyper1Rt
+        | ClientType::HyperRt1
         | ClientType::HyperH2
             if opts.uri.is_empty() =>
         {
             eprintln!("HTTP uri not specified!");
             std::process::exit(1);
         }
-        ClientType::HyperLegacy | ClientType::Hyper1Rt if opts.host.is_some() => {
+        ClientType::HyperLegacy | ClientType::HyperRt1 if opts.host.is_some() => {
             return Err(anyhow!("Host option not available with this client!"));
         }
         ClientType::Reqwest if !opts.trailers.is_empty() => {

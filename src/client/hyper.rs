@@ -31,7 +31,7 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
     opts: Arc<Options>,
     rt_stats: &RealtimeStats,
 ) -> Statistics {
-    let mut statistics = Statistics::default();
+    let mut statistics = Statistics::new(opts.latency);
     let mut total: u32 = 0;
     let mut banner = HashSet::new();
     let uri_str = opts.uri[cid % opts.uri.len()].as_str();
@@ -90,6 +90,8 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
             *req.uri_mut() = uri.clone();
             *req.headers_mut() = headers.clone();
 
+            let start_lat = opts.latency.then_some(Instant::now());
+
             match sender.send_request(req).await {
                 Ok(res) => match discard_body(res).await {
                     Ok(StatusCode::OK) => statistics.ok(&rt_stats),
@@ -106,6 +108,10 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
                     continue 'connection;
                 }
             }
+
+            if let Some(start_lat) = start_lat && let Some(hist) = &mut statistics.latency {
+                hist.record(start_lat.elapsed().as_micros() as u64).ok();
+            };
 
             total += 1;
 

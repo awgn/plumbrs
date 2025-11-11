@@ -9,7 +9,7 @@ use clap::ValueEnum;
 #[derive(ValueEnum, Debug, Copy, Clone)]
 pub enum ClientType {
     HyperLegacy,
-    Hyper1Rt,
+    HyperRt1,
     HyperH2,
     Hyper,
     Reqwest,
@@ -21,7 +21,7 @@ impl std::fmt::Display for ClientType {
         match self {
             ClientType::Hyper => write!(f, "hyper"),
             ClientType::HyperLegacy => write!(f, "hyper-legacy"),
-            ClientType::Hyper1Rt => write!(f, "hyper-1rt"),
+            ClientType::HyperRt1 => write!(f, "hyper-rt1"),
             ClientType::HyperH2 => write!(f, "hyper-h2"),
             ClientType::Reqwest => write!(f, "reqwest"),
             ClientType::Help => write!(f, "help"),

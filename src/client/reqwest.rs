@@ -15,7 +15,7 @@ pub async fn http_reqwest(
     opts: Arc<Options>,
     rt_stats: &RealtimeStats,
 ) -> Statistics {
-    let mut statistics = Statistics::default();
+    let mut statistics = Statistics::new(opts.latency);
     let mut total: u32 = 0;
     let mut banner = HashSet::new();
     let uri_str = opts.uri[cid % opts.uri.len()].as_str();
@@ -58,6 +58,9 @@ pub async fn http_reqwest(
             if let Some(ref body) = body {
                 *req.body_mut() = Some(body.clone().into());
             }
+
+            let start_lat = opts.latency.then_some(Instant::now());
+
             match client.execute(req).await {
                 Ok(res) => {
                     let code = res.status();
@@ -73,6 +76,10 @@ pub async fn http_reqwest(
                     continue 'connection;
                 }
             }
+
+            if let Some(start_lat) = start_lat && let Some(hist) = &mut statistics.latency {
+                hist.record(start_lat.elapsed().as_micros() as u64).ok();
+            };
 
             total += 1;
             if should_stop(total, start, &opts) {

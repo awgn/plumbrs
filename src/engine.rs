@@ -148,6 +148,36 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
         }
     }
 
+    let pretty_lat = |l: f64| {
+        if l >= 1_000_000.0 {
+            format!("{:.2}s", l / 1_000_000.0)
+        } else if l >= 1_000.0 {
+            format!("{:.2}ms", l / 1_000.0)
+        } else {
+            format!("{:.2}µs", l)
+        }
+    };
+
+    // Latency
+    if total.latency.is_some() {
+        println!("─────────────────────────────────────────────────────────────────");
+        println!(" Latency:                                                   ");
+        if let Some(latency) = total.latency {
+            println!(
+                "   min:{:<10} mean:{:<10} max:{:<10}",
+                pretty_lat(latency.min() as f64),
+                pretty_lat(latency.mean() as f64),
+                pretty_lat(latency.max() as f64)
+            );
+            println!(
+                "   p50:{:<10} p90:{:<10}  p99:{:<10}",
+                pretty_lat(latency.value_at_quantile(0.50) as f64),
+                pretty_lat(latency.value_at_quantile(0.95) as f64),
+                pretty_lat(latency.value_at_quantile(0.99) as f64),
+            );
+        }
+    }
+
     println!("─────────────────────────────────────────────────────────────────");
 
     Ok(())
@@ -280,7 +310,7 @@ async fn spawn_tasks(
     let mut tasks = JoinSet::new();
     let mut statistics = Statistics::default();
 
-    let client = if matches!(opts.client_type, ClientType::Hyper1Rt) {
+    let client = if matches!(opts.client_type, ClientType::HyperRt1) {
         Some(build_http_connection_legacy::<RequestBody>(&opts))
     } else {
         None
@@ -297,7 +327,7 @@ async fn spawn_tasks(
             ClientType::HyperLegacy => {
                 tasks.spawn(async move { http_hyper_legacy(id, con, opts, &stats[id]).await });
             }
-            ClientType::Hyper1Rt => {
+            ClientType::HyperRt1 => {
                 let con_client = client.as_ref().unwrap().clone();
                 tasks.spawn(
                     async move { http_hyper_1rt(id, con, opts, con_client, &stats[id]).await },

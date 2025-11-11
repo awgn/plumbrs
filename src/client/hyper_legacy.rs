@@ -19,7 +19,7 @@ pub async fn http_hyper_legacy(
     opts: Arc<Options>,
     rt_stats: &RealtimeStats,
 ) -> Statistics {
-    let mut statistics = Statistics::default();
+    let mut statistics = Statistics::new(opts.latency);
     let mut total: u32 = 0;
     let mut banner = HashSet::new();
     let uri_str = opts.uri[cid % opts.uri.len()].as_str();
@@ -71,6 +71,8 @@ pub async fn http_hyper_legacy(
             *req.uri_mut() = uri.clone();
             *req.headers_mut() = headers.clone();
 
+            let start_lat = opts.latency.then_some(Instant::now());
+
             match client.request(req).await {
                 Ok(res) => match discard_body(res).await {
                     Ok(StatusCode::OK) => statistics.ok(&rt_stats),
@@ -88,7 +90,12 @@ pub async fn http_hyper_legacy(
                 }
             }
 
+            if let Some(start_lat) = start_lat && let Some(hist) = &mut statistics.latency {
+                hist.record(start_lat.elapsed().as_micros() as u64).ok();
+            };
+
             total += 1;
+
             if should_stop(total, start, &opts) {
                 break 'connection;
             }
