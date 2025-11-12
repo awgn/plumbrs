@@ -90,7 +90,7 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
         },
     );
 
-    println!("\n─────────────────────────────────────────────────────────────────");
+    println!("\n─────────────────────────────────────────────────────────────────────");
 
     let total_ok = total.total_ok();
     let total_3xx = total.total_status_3xx();
@@ -117,7 +117,7 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
     let ok_sec = total.total_ok() * 1000000 / duration;
 
     // HTTP status codes details
-    println!("─────────────────────────────────────────────────────────────────");
+    println!("─────────────────────────────────────────────────────────────────────");
     println!(" Details:                                                        ");
     if total_ok > 0 {
         println!("   200:   total:{:<10} rate/sec:{:<10}", total_ok, ok_sec);
@@ -128,14 +128,14 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
         for (key, total_value) in http_statuses {
             let total_value = total_value;
             let per_sec = total_value * 1000000 / duration;
-            println!("   {key}:   total:{:<10} rate/sec:{:<10}", total_value, per_sec);
+            println!("{key:>6}:   total:{:<10} rate/sec:{:<10}", total_value, per_sec);
         }
     }
 
     // Errors
     let errors: Vec<_> = total.get_errors().iter().collect();
     if !errors.is_empty() {
-        println!("─────────────────────────────────────────────────────────────────");
+        println!("─────────────────────────────────────────────────────────────────────");
         println!(" Errors:                                                         ");
         for (key, total_value) in errors {
             let per_sec = *total_value * 1000000 / duration;
@@ -160,25 +160,28 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
 
     // Latency
     if total.latency.is_some() {
-        println!("─────────────────────────────────────────────────────────────────");
+        println!("─────────────────────────────────────────────────────────────────────");
         println!(" Latency:                                                   ");
         if let Some(latency) = total.latency {
             println!(
-                "   min:{:<10} mean:{:<10} max:{:<10}",
+                "{:>10}p50:{:<12} p75:{:<11} p90:{:<10}  p99:{:<10}",
+                "",
+                pretty_lat(latency.value_at_quantile(0.50) as f64),
+                pretty_lat(latency.value_at_quantile(0.75) as f64),
+                pretty_lat(latency.value_at_quantile(0.95) as f64),
+                pretty_lat(latency.value_at_quantile(0.99) as f64),
+            );
+            println!(
+                "{:>10}min:{:<12} mean:{:<10} max:{:<10}",
+                "",
                 pretty_lat(latency.min() as f64),
                 pretty_lat(latency.mean() as f64),
                 pretty_lat(latency.max() as f64)
             );
-            println!(
-                "   p50:{:<10} p90:{:<10}  p99:{:<10}",
-                pretty_lat(latency.value_at_quantile(0.50) as f64),
-                pretty_lat(latency.value_at_quantile(0.95) as f64),
-                pretty_lat(latency.value_at_quantile(0.99) as f64),
-            );
         }
     }
 
-    println!("─────────────────────────────────────────────────────────────────");
+    println!("─────────────────────────────────────────────────────────────────────");
 
     Ok(())
 }
