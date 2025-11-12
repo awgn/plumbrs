@@ -34,10 +34,10 @@ fn enforce_consistency(opts: &Options) -> Result<()> {
     #[cfg(feature = "orion_client")]
     if opts.http2_can_share
         && !matches!(opts.client_type, ClientType::HyperLegacy)
-        && !matches!(opts.client_type, ClientType::Hyper1Rt)
+        && !matches!(opts.client_type, ClientType::Hyperrt1)
     {
         return Err(anyhow!(
-            "HTTP2 Connection sharing only available with hyper-legacy or hyper-1rt client!"
+            "HTTP2 Connection sharing only available with hyper-legacy or hyper-rt1 client!"
         ));
     }
 
@@ -67,7 +67,7 @@ fn enforce_consistency(opts: &Options) -> Result<()> {
                 "  hyper-legacy  - Hyper client (legacy), one per connection. Both HTTP/1 and HTTP/2"
             );
             println!(
-                "  hyper-1rt     - Hyper client (legacy), one per runtime. Both HTTP/1 and HTTP/2"
+                "  hyper-rt1     - Hyper client (legacy), one per runtime. Both HTTP/1 and HTTP/2"
             );
             println!("  reqwest       - Reqwest client, one per runtime. Both HTTP/1 and HTTP/2");
             std::process::exit(0);

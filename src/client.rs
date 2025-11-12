@@ -1,5 +1,5 @@
 pub mod hyper;
-pub mod hyper_1rt;
+pub mod hyper_rt1;
 pub mod hyper_h2;
 pub mod hyper_legacy;
 pub mod reqwest;

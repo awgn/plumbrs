@@ -10,7 +10,7 @@ Plumbrs provides ready-to-use benchmarking tasks for several popular HTTP client
 
 1. Hyper (`hyper`) — Hyper-based HTTP client (one per connection).
 2. Hyper (legacy) (`hyper-legacy`) — Legacy Hyper HTTP client (one per connection).
-3. Hyper (legacy, one per runtime) (`hyper-1rt`) — Legacy Hyper HTTP client shared across a runtime.
+3. Hyper (legacy, one per runtime) (`hyper-rt1`) — Legacy Hyper HTTP client shared across a runtime.
 4. Hyper + h2 (`hyper-h2`) — HTTP/2 client using Hyper with the h2 library (one per connection).
 5. Reqwest (`reqwest`) — Popular Reqwest HTTP client (one per runtime).
 6. Help (`help`) — Print available client types and exit.
@@ -60,7 +60,7 @@ Plumbrs provides ready-to-use benchmarking tasks for several popular HTTP client
 
 - `--host <HOST>`
   Set the host to benchmark (for example, `http://192.168.0.1:8080`).
-  Note: Not available with `hyper-legacy` or `hyper-1rt`.
+  Note: Not available with `hyper-legacy` or `hyper-rt1`.
 
 ## Client options
 
@@ -69,7 +69,7 @@ Plumbrs provides ready-to-use benchmarking tasks for several popular HTTP client
   - `hyper` — Hyper client; one per connection. Supports HTTP/1 and HTTP/2.
   - `hyper-h2` — Hyper client using the h2 library; one per connection. HTTP/2 only.
   - `hyper-legacy` — Legacy Hyper client; one per connection. Supports HTTP/1 and HTTP/2.
-  - `hyper-1rt` — Legacy Hyper client; one per runtime. Supports HTTP/1 and HTTP/2.
+  - `hyper-rt1` — Legacy Hyper client; one per runtime. Supports HTTP/1 and HTTP/2.
   - `reqwest` — Reqwest client; one per runtime. Supports HTTP/1 and HTTP/2.
   - `help` — Show available client types and exit.
 
@@ -97,7 +97,7 @@ Plumbrs provides ready-to-use benchmarking tasks for several popular HTTP client
   Allow HTTP/2 connection sharing.
   Notes:
   - Requires `--http2`.
-  - Available only with `hyper-legacy` or `hyper-1rt`.
+  - Available only with `hyper-legacy` or `hyper-rt1`.
   - Available only when built with the `orion_client` feature flag.
 
 ## Tokio runtime options
@@ -122,14 +122,14 @@ Plumbrs provides ready-to-use benchmarking tasks for several popular HTTP client
 The following CLI constraints are enforced at runtime:
 
 - URI required for most clients:
-  - For `hyper`, `hyper-legacy`, `hyper-1rt`, and `hyper-h2`, a URI (positional argument) must be provided.
+  - For `hyper`, `hyper-legacy`, `hyper-rt1`, and `hyper-h2`, a URI (positional argument) must be provided.
 - Host option restrictions:
-  - `--host` is not available with `hyper-legacy` or `hyper-1rt`.
+  - `--host` is not available with `hyper-legacy` or `hyper-rt1`.
 - CPS restriction:
   - `--cps` can only be used with `--client-type hyper`.
 - HTTP/2 connection sharing (`--http2-can-share`) restrictions:
   - Requires `--http2`.
-  - Only valid with `--client-type hyper-legacy` or `--client-type hyper-1rt`.
+  - Only valid with `--client-type hyper-legacy` or `--client-type hyper-rt1`.
   - Only available when compiled with the `orion_client` feature flag.
 - Threading consistency:
   - When `--multi-threaded <N>` is provided, `--threads` must be an exact multiple of `<N>`.
@@ -181,4 +181,4 @@ The `--http2-can-share` option is available only when compiled with the `orion_c
 ```bash
 cargo build --release --features orion_client
 ```
-It also requires `--http2` and is only valid with `hyper-legacy` or `hyper-1rt`.
+It also requires `--http2` and is only valid with `hyper-legacy` or `hyper-rt1`.

@@ -27,7 +27,7 @@ type WithTrailersBody = http_body_util::combinators::WithTrailers<
 
 pub type RequestBody = Either<Full<Bytes>, WithTrailersBody>;
 
-pub async fn http_hyper_1rt(
+pub async fn http_hyper_rt1(
     tid: usize,
     cid: usize,
     opts: Arc<Options>,
@@ -63,7 +63,7 @@ pub async fn http_hyper_1rt(
         if cid < opts.uri.len() && !banner.contains(uri_str) {
             banner.insert(uri_str.to_owned());
             println!(
-                "hyper-1rt [{tid:>2}] -> connecting to {} {}...",
+                "hyper-rt1 [{tid:>2}] -> connecting to {} {}...",
                 uri,
                 if opts.http2 { "HTTP/2" } else { "HTTP/1.1" }
             );

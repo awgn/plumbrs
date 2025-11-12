@@ -1,7 +1,7 @@
 use crate::Options;
 use crate::client::ClientType;
 use crate::client::hyper::*;
-use crate::client::hyper_1rt::{RequestBody, http_hyper_1rt};
+use crate::client::hyper_rt1::{RequestBody, http_hyper_rt1};
 use crate::client::hyper_h2::*;
 use crate::client::hyper_legacy::*;
 use crate::client::reqwest::*;
@@ -327,7 +327,7 @@ async fn spawn_tasks(
             ClientType::HyperRt1 => {
                 let con_client = client.as_ref().unwrap().clone();
                 tasks.spawn(
-                    async move { http_hyper_1rt(id, con, opts, con_client, &stats[id]).await },
+                    async move { http_hyper_rt1(id, con, opts, con_client, &stats[id]).await },
                 );
             }
             ClientType::HyperH2 => {
