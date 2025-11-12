@@ -103,7 +103,9 @@ pub async fn http_hyper_1rt(
                 }
             }
 
-            if let Some(start_lat) = start_lat && let Some(hist) = &mut statistics.latency {
+            if let Some(start_lat) = start_lat
+                && let Some(hist) = &mut statistics.latency
+            {
                 hist.record(start_lat.elapsed().as_micros() as u64).ok();
             };
 

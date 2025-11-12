@@ -1,25 +1,25 @@
 use crate::Options;
-use atomic_time::AtomicDuration;
-use atomic_time::AtomicInstant;
 use crate::client::ClientType;
 use crate::client::hyper::*;
-use crate::client::hyper_1rt::{http_hyper_1rt, RequestBody};
+use crate::client::hyper_1rt::{RequestBody, http_hyper_1rt};
 use crate::client::hyper_h2::*;
 use crate::client::hyper_legacy::*;
 use crate::client::reqwest::*;
 use crate::client::utils::build_http_connection_legacy;
 use crate::stats::RealtimeStats;
 use crate::stats::Statistics;
+use atomic_time::AtomicDuration;
+use atomic_time::AtomicInstant;
 
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
+use crossterm::{cursor, execute, terminal};
 use scopeguard::defer;
 use tokio::runtime::Builder;
 use tokio::task::JoinSet;
-use crossterm::{cursor, execute, terminal};
 
 use anyhow::Result;
 use std::sync::atomic::Ordering;
@@ -72,9 +72,8 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
         let mut opts = opts.clone();
         let stats = rt_stats.clone();
         opts.connections /= instances; // number of connection per engine
-        let handle = thread::spawn(move || -> Result<Statistics> {
-            runtime_engine(id, opts, stats)
-        });
+        let handle =
+            thread::spawn(move || -> Result<Statistics> { runtime_engine(id, opts, stats) });
 
         handles.push(handle);
     }
@@ -83,12 +82,9 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
     let out = coll.collect::<Result<Vec<_>, _>>()?;
     let duration = start.elapsed().as_micros() as u64;
 
-    let total = out.into_iter().fold(
-        Statistics::default(),
-        |acc_s,s| {
-            acc_s + s
-        },
-    );
+    let total = out
+        .into_iter()
+        .fold(Statistics::default(), |acc_s, s| acc_s + s);
 
     println!("\n─────────────────────────────────────────────────────────────────────");
 
@@ -100,18 +96,13 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
     let idle_perc = total.total_idle() / (opts.threads as f64) * 100.0;
 
     // Total statistics
-    println!(" Total:   okay:{:<10}  3xx:{:<10}  4xx:{:<10}  5xx:{:<10} ",
-        total_ok,
-        total_3xx,
-        total_4xx,
-        total_5xx,
+    println!(
+        " Total:   okay:{:<10}  3xx:{:<10}  4xx:{:<10}  5xx:{:<10} ",
+        total_ok, total_3xx, total_4xx, total_5xx,
     );
 
     // HTTP status codes summary
-    println!("          err:{:<10}   %idle:{:<10} ",
-        total_err,
-        idle_perc
-    );
+    println!("          err:{:<10}   %idle:{:<10} ", total_err, idle_perc);
 
     // Throughput
     let ok_sec = total.total_ok() * 1000000 / duration;
@@ -128,7 +119,10 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
         for (key, total_value) in http_statuses {
             let total_value = total_value;
             let per_sec = total_value * 1000000 / duration;
-            println!("{key:>6}:   total:{:<10} rate/sec:{:<10}", total_value, per_sec);
+            println!(
+                "{key:>6}:   total:{:<10} rate/sec:{:<10}",
+                total_value, per_sec
+            );
         }
     }
 
@@ -383,9 +377,14 @@ pub async fn meter(rt_stats: Arc<Vec<RealtimeStats>>) {
             total_fail += stats.fail.swap(0, Ordering::Relaxed) as u64;
         }
 
-        print!("\r{} Stats: ok: {total_ok}/sec, fail: {total_fail}/sec, err: {total_err}/sec",
-               SPINNER[spinner_idx]);
-        let _ = execute!(std::io::stdout(), terminal::Clear(terminal::ClearType::UntilNewLine));
+        print!(
+            "\r{} Stats: ok: {total_ok}/sec, fail: {total_fail}/sec, err: {total_err}/sec",
+            SPINNER[spinner_idx]
+        );
+        let _ = execute!(
+            std::io::stdout(),
+            terminal::Clear(terminal::ClearType::UntilNewLine)
+        );
 
         spinner_idx = (spinner_idx + 1) % SPINNER.len();
     }

@@ -75,7 +75,10 @@ pub struct Options {
     pub cps: bool,
     #[arg(help = "Use http2 only", long = "http2")]
     pub http2: bool,
-    #[arg(help = "Enable latency estimation (Gil Tene's algorithm)", long = "latency")]
+    #[arg(
+        help = "Enable latency estimation (Gil Tene's algorithm)",
+        long = "latency"
+    )]
     pub latency: bool,
     #[arg(help = "Sets whether to use an adaptive flow control.", long)]
     pub http2_adaptive_window: Option<bool>,

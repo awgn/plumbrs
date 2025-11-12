@@ -37,10 +37,13 @@ impl Statistics {
             err: HashMap::new(),
             idle: 0.0,
             latency: if with_latency {
-                Some(Histogram::<u64>::new_with_bounds(1, 1000000, 3).expect("failed to create histogram"))
+                Some(
+                    Histogram::<u64>::new_with_bounds(1, 1000000, 3)
+                        .expect("failed to create histogram"),
+                )
             } else {
                 None
-            }
+            },
         }
     }
 
@@ -164,9 +167,7 @@ impl std::ops::Add for Statistics {
             status: hs,
             idle: self.idle + other.idle,
             latency: match (self.latency, other.latency) {
-                (Some(h1), Some(h2)) => {
-                    Some(h1.add(&h2))
-                }
+                (Some(h1), Some(h2)) => Some(h1.add(&h2)),
                 (Some(h), None) | (None, Some(h)) => Some(h),
                 (None, None) => None,
             },
