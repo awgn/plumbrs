@@ -66,7 +66,7 @@ pub async fn http_hyper_h2(
         let mut stream = match stream_res {
             Ok(s) => s,
             Err(ref err) => {
-                statistics.err(format!("{err:?}"), &rt_stats);
+                statistics.err(format!("{err:?}"), rt_stats);
                 total += 1;
                 continue 'connection;
             }
@@ -78,7 +78,7 @@ pub async fn http_hyper_h2(
         let (mut h2_client, mut connection) = match conn {
             Ok(h2_conn) => h2_conn,
             Err(ref err) => {
-                statistics.err(format!("{err:?}"), &rt_stats);
+                statistics.err(format!("{err:?}"), rt_stats);
                 total += 1;
                 continue 'connection;
             }
@@ -99,7 +99,7 @@ pub async fn http_hyper_h2(
             h2_client = match h2_client.ready().await {
                 Ok(h2) => h2,
                 Err(ref err) => {
-                    statistics.err(format!("{err:?}"), &rt_stats);
+                    statistics.err(format!("{err:?}"), rt_stats);
                     continue 'connection;
                 }
             };
@@ -111,7 +111,7 @@ pub async fn http_hyper_h2(
             let (response, mut send_stream) = match h2_client.send_request(req, end_of_stream) {
                 Ok(r) => r,
                 Err(ref err) => {
-                    statistics.err(err.to_string(), &rt_stats);
+                    statistics.err(err.to_string(), rt_stats);
                     total += 1;
                     continue 'connection;
                 }
@@ -129,7 +129,7 @@ pub async fn http_hyper_h2(
             let res = match response.await {
                 Ok(res) => res,
                 Err(ref err) => {
-                    statistics.err(format!("{err:?}"), &rt_stats);
+                    statistics.err(format!("{err:?}"), rt_stats);
                     total += 1;
                     continue 'connection;
                 }
@@ -137,13 +137,13 @@ pub async fn http_hyper_h2(
 
             match res.status() {
                 StatusCode::OK => {
-                    statistics.ok(&rt_stats);
+                    statistics.ok(rt_stats);
                     let (_head, mut body) = res.into_parts();
                     while let Some(chunk_res) = body.data().await {
                         let chunk_len = match chunk_res {
                             Ok(ref c) => c.len(),
                             Err(ref err) => {
-                                statistics.err(format!("{err:?}"), &rt_stats);
+                                statistics.err(format!("{err:?}"), rt_stats);
                                 total += 1;
                                 continue 'connection;
                             }
@@ -152,7 +152,7 @@ pub async fn http_hyper_h2(
                         let _ = body.flow_control().release_capacity(chunk_len);
                     }
                 }
-                code => statistics.http_status(code, &rt_stats),
+                code => statistics.http_status(code, rt_stats),
             }
 
             if let Some(start_lat) = start_lat
@@ -174,7 +174,7 @@ pub async fn http_hyper_h2(
                 stream = match stream_res {
                     Ok(s) => s,
                     Err(ref err) => {
-                        statistics.err(format!("{err:?}"), &rt_stats);
+                        statistics.err(format!("{err:?}"), rt_stats);
                         total += 1;
                         continue 'connection;
                     }
@@ -185,7 +185,7 @@ pub async fn http_hyper_h2(
                 (h2_client, connection) = match conn {
                     Ok(h2_conn) => h2_conn,
                     Err(ref err) => {
-                        statistics.err(format!("{err:?}"), &rt_stats);
+                        statistics.err(format!("{err:?}"), rt_stats);
                         total += 1;
                         continue 'connection;
                     }

@@ -117,7 +117,6 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
     let http_statuses: Vec<_> = total.get_http_status().iter().collect();
     if !http_statuses.is_empty() {
         for (key, total_value) in http_statuses {
-            let total_value = total_value;
             let per_sec = total_value * 1000000 / duration;
             println!(
                 "{key:>6}:   total:{:<10} rate/sec:{:<10}",
@@ -169,7 +168,7 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
                 "{:>10}min:{:<12} mean:{:<10} max:{:<10}",
                 "",
                 pretty_lat(latency.min() as f64),
-                pretty_lat(latency.mean() as f64),
+                pretty_lat(latency.mean()),
                 pretty_lat(latency.max() as f64)
             );
         }
@@ -372,9 +371,9 @@ pub async fn meter(rt_stats: Arc<Vec<RealtimeStats>>) {
         let mut total_fail = 0u64;
 
         for stats in rt_stats.iter() {
-            total_ok += stats.ok.swap(0, Ordering::Relaxed) as u64;
-            total_err += stats.err.swap(0, Ordering::Relaxed) as u64;
-            total_fail += stats.fail.swap(0, Ordering::Relaxed) as u64;
+            total_ok += stats.ok.swap(0, Ordering::Relaxed);
+            total_err += stats.err.swap(0, Ordering::Relaxed);
+            total_fail += stats.fail.swap(0, Ordering::Relaxed);
         }
 
         print!(

@@ -202,7 +202,7 @@ impl HttpConnectionBuilder for Http1 {
         let stream = match stream_res {
             Ok(s) => s,
             Err(ref err) => {
-                stats.err(format!("{err:?}"), &rt_stats);
+                stats.err(format!("{err:?}"), rt_stats);
                 return None;
             }
         };
@@ -212,7 +212,7 @@ impl HttpConnectionBuilder for Http1 {
         let (sender, connection) = match conn_res {
             Ok(p) => p,
             Err(ref err) => {
-                stats.err(format!("{err:?}"), &rt_stats);
+                stats.err(format!("{err:?}"), rt_stats);
                 return None;
             }
         };
@@ -251,7 +251,7 @@ impl HttpConnectionBuilder for Http2 {
         let stream = match stream_res {
             Ok(s) => s,
             Err(ref err) => {
-                stats.err(format!("{err:?}"), &rt_stats);
+                stats.err(format!("{err:?}"), rt_stats);
                 return None;
             }
         };
@@ -272,7 +272,7 @@ impl HttpConnectionBuilder for Http2 {
         let (sender, connection) = match conn_res {
             Ok(p) => p,
             Err(ref err) => {
-                stats.err(format!("{err:?}"), &rt_stats);
+                stats.err(format!("{err:?}"), rt_stats);
                 return None;
             }
         };

@@ -23,11 +23,7 @@ pub async fn http_reqwest(
     let headers = build_headers(None, opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
 
-    let body = if let Some(body) = &opts.body {
-        Some(body.clone())
-    } else {
-        None
-    };
+    let body = opts.body.clone();
 
     let start = Instant::now();
     'connection: loop {
@@ -65,13 +61,13 @@ pub async fn http_reqwest(
                 Ok(res) => {
                     let code = res.status();
                     if matches!(code, StatusCode::OK) {
-                        statistics.ok(&rt_stats);
+                        statistics.ok(rt_stats);
                     } else {
-                        statistics.http_status(code, &rt_stats);
+                        statistics.http_status(code, rt_stats);
                     }
                 }
                 Err(ref err) => {
-                    statistics.err(format!("{err:?}"), &rt_stats);
+                    statistics.err(format!("{err:?}"), rt_stats);
                     total += 1;
                     continue 'connection;
                 }

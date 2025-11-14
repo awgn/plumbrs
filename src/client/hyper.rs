@@ -47,11 +47,7 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
     let trailers = build_trailers(opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build trailers: {e}"));
 
-    let body = if let Some(body) = &opts.body {
-        Full::new(body.clone().into())
-    } else {
-        Full::new(Bytes::new())
-    };
+    let body : Full<Bytes> = opts.body.clone().map(Into::into).unwrap_or_default();
 
     let start = Instant::now();
     'connection: loop {
@@ -68,7 +64,7 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
         }
 
         let (mut sender, mut conn_task) =
-            match B::build_connection(endpoint, &mut statistics, &rt_stats, &opts).await {
+            match B::build_connection(endpoint, &mut statistics, rt_stats, &opts).await {
                 Some(s) => s,
                 None => {
                     total += 1;
@@ -94,16 +90,16 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
 
             match sender.send_request(req).await {
                 Ok(res) => match discard_body(res).await {
-                    Ok(StatusCode::OK) => statistics.ok(&rt_stats),
-                    Ok(code) => statistics.http_status(code, &rt_stats),
+                    Ok(StatusCode::OK) => statistics.ok(rt_stats),
+                    Ok(code) => statistics.http_status(code, rt_stats),
                     Err(err) => {
-                        statistics.err(format!("{err:?}"), &rt_stats);
+                        statistics.err(format!("{err:?}"), rt_stats);
                         total += 1;
                         continue 'connection;
                     }
                 },
                 Err(ref err) => {
-                    statistics.err(format!("{err:?}"), &rt_stats);
+                    statistics.err(format!("{err:?}"), rt_stats);
                     total += 1;
                     continue 'connection;
                 }
@@ -124,7 +120,7 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
             if opts.cps {
                 conn_task.abort();
                 (sender, conn_task) =
-                    match B::build_connection(endpoint, &mut statistics, &rt_stats, &opts).await {
+                    match B::build_connection(endpoint, &mut statistics, rt_stats, &opts).await {
                         Some(s) => s,
                         None => {
                             total += 1;
@@ -134,7 +130,7 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
             } else {
                 let res = sender.ready().await;
                 if let Err(ref err) = res {
-                    statistics.err(format!("{err:?}"), &rt_stats);
+                    statistics.err(format!("{err:?}"), rt_stats);
                 }
             }
         }

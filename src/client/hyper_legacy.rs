@@ -75,16 +75,16 @@ pub async fn http_hyper_legacy(
 
             match client.request(req).await {
                 Ok(res) => match discard_body(res).await {
-                    Ok(StatusCode::OK) => statistics.ok(&rt_stats),
-                    Ok(code) => statistics.http_status(code, &rt_stats),
+                    Ok(StatusCode::OK) => statistics.ok(rt_stats),
+                    Ok(code) => statistics.http_status(code, rt_stats),
                     Err(err) => {
-                        statistics.err(format!("{err:?}"), &rt_stats);
+                        statistics.err(format!("{err:?}"), rt_stats);
                         total += 1;
                         continue 'connection;
                     }
                 },
                 Err(ref err) => {
-                    statistics.err(format!("{err:?}"), &rt_stats);
+                    statistics.err(format!("{err:?}"), rt_stats);
                     total += 1;
                     continue 'connection;
                 }
