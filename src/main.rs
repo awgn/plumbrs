@@ -18,12 +18,12 @@ static GLOBAL: Jemalloc = Jemalloc;
 
 fn main() -> Result<()> {
     pretty_env_logger::init();
-    let opts = Options::parse();
-    enforce_consistency(&opts)?;
+    let mut opts = Options::parse();
+    enforce_consistency(&mut opts)?;
     engine::run_tokio_engines(opts)
 }
 
-fn enforce_consistency(opts: &Options) -> Result<()> {
+fn enforce_consistency(opts: &mut Options) -> Result<()> {
     #[cfg(feature = "orion_client")]
     if opts.http2_can_share && !opts.http2 {
         return Err(anyhow!(
@@ -39,6 +39,19 @@ fn enforce_consistency(opts: &Options) -> Result<()> {
         return Err(anyhow!(
             "HTTP2 Connection sharing only available with hyper-legacy or hyper-rt1 client!"
         ));
+    }
+
+    if matches!(opts.method, Some(http::Method::TRACE)) && opts.body.len() > 1  {
+        return Err(anyhow!("TRACE method cannot have a body!"));
+    }
+
+    if matches!(opts.method, None) {
+        if opts.body.is_empty()  {
+            opts.method = Some(http::Method::GET);
+        }
+        else {
+            opts.method = Some(http::Method::POST);
+        }
     }
 
     match opts.client_type {

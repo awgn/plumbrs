@@ -51,8 +51,8 @@ pub async fn http_hyper_h2(
         if cid < opts.uri.len() && !banner.contains(uri_str) {
             banner.insert(uri_str.to_owned());
             println!(
-                "hyper-h2 [{tid:>2}] -> connecting to {}:{}, uri= {} HTTP/2...",
-                host, port, uri
+                "hyper-h2 [{tid:>2}] -> connecting to {}:{}, method = {} uri = {} HTTP2...",
+                host, port, opts.method.as_ref().unwrap_or(&http::Method::GET), uri
             );
         }
 
@@ -88,7 +88,7 @@ pub async fn http_hyper_h2(
 
         loop {
             let mut req = Request::new(());
-            *req.method_mut() = opts.method.clone();
+            *req.method_mut() = opts.method.clone().unwrap_or(http::Method::GET);
             *req.uri_mut() = uri.clone();
             *req.headers_mut() = headers.clone();
 

@@ -165,6 +165,8 @@ pub trait HttpConnectionBuilder {
         B::Data: Send,
         B::Error: Into<Box<dyn std::error::Error + Send + Sync>>;
 
+    const SCHEME: &'static str;
+
     fn build_connection<B>(
         endpoint: &'static str,
         stats: &mut Statistics,
@@ -184,6 +186,8 @@ impl HttpConnectionBuilder for Http1 {
         B: Body + Send + Unpin + 'static,
         B::Data: Send,
         B::Error: Into<Box<dyn std::error::Error + Send + Sync>>;
+
+    const SCHEME: &'static str = "HTTP/1.1";
 
     async fn build_connection<B>(
         endpoint: &'static str,
@@ -233,6 +237,8 @@ impl HttpConnectionBuilder for Http2 {
         B: Body + Send + 'static + Unpin,
         B::Data: Send,
         B::Error: Into<Box<dyn std::error::Error + Send + Sync>>;
+
+    const SCHEME: &'static str = "HTTP/2";
 
     async fn build_connection<B>(
         endpoint: &'static str,

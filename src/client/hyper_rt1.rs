@@ -59,7 +59,8 @@ pub async fn http_hyper_rt1(
         if cid < opts.uri.len() && !banner.contains(uri_str) {
             banner.insert(uri_str.to_owned());
             println!(
-                "hyper-rt1 [{tid:>2}] -> connecting to {} {}...",
+                "hyper-rt1 [{tid:>2}] -> connecting. {} {} {}...",
+                opts.method.as_ref().unwrap_or(&http::Method::GET),
                 uri,
                 if opts.http2 { "HTTP/2" } else { "HTTP/1.1" }
             );
@@ -74,7 +75,7 @@ pub async fn http_hyper_rt1(
                 Either::Left(Full::new(body_bytes.clone()))
             };
             let mut req = Request::builder()
-                .method(opts.method.clone())
+                .method(opts.method.clone().unwrap_or(http::Method::GET))
                 .uri(uri.clone())
                 .body(body)
                 .unwrap();

@@ -62,8 +62,8 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
         if cid < opts.uri.len() && !banner.contains(uri_str) {
             banner.insert(uri_str.to_owned());
             println!(
-                "hyper-multichunk [{tid:>2}] -> connecting to {}:{}, uri = {} HTTP/1.1...",
-                host, port, uri
+                "hyper-multichunk [{tid:>2}] -> connecting to {}:{}, method = {} uri = {} {}...",
+                host, port, opts.method.as_ref().unwrap_or(&http::Method::GET), uri, B::SCHEME
             );
         }
 
@@ -93,7 +93,7 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
             };
 
             let mut req = Request::new(body);
-            *req.method_mut() = opts.method.clone();
+            *req.method_mut() = opts.method.clone().unwrap_or(http::Method::GET);
             *req.uri_mut() = uri.clone();
             *req.headers_mut() = headers.clone();
 

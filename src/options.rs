@@ -59,8 +59,8 @@ pub struct Options {
     #[cfg(tokio_unstable)]
     #[arg(help = "Disable Tokio lifo slot heuristic", long = "disable-lifo-slot")]
     pub disable_lifo_slot: bool,
-    #[arg(help = "HTTP method", short = 'M', long = "method", default_value = "GET", value_parser = parse_http_method)]
-    pub method: Method,
+    #[arg(help = "HTTP method", short = 'M', long = "method", value_parser = parse_http_method)]
+    pub method: Option<Method>,
     #[arg(help = "HTTP headers", short = 'H', long = "header", value_parser = parse_key_val)]
     pub headers: Vec<(String, String)>,
     #[arg(help = "HTTP trailers", short = 'T', long = "trailer", value_parser = parse_key_val)]
@@ -111,9 +111,9 @@ fn parse_secs(arg: &str) -> Result<Duration, std::num::ParseIntError> {
     Ok(Duration::from_secs(seconds))
 }
 
-fn parse_http_method(arg: &str) -> Result<Method, InvalidMethod> {
+fn parse_http_method(arg: &str) -> Result<Option<Method>, InvalidMethod> {
     let method = arg.parse()?;
-    Ok(method)
+    Ok(Some(method))
 }
 
 fn parse_key_val(s: &str) -> Result<(String, String), String> {

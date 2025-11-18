@@ -34,7 +34,8 @@ pub async fn http_reqwest(
         if cid < opts.uri.len() && !banner.contains(uri_str) {
             banner.insert(uri_str.to_owned());
             println!(
-                "reqwest [{tid:>2}] -> connecting to {} {}...",
+                "reqwest [{tid:>2}] -> connecting. {} {} {}...",
+                opts.method.as_ref().unwrap_or(&http::Method::GET),
                 url,
                 if opts.http2 { "HTTP/2" } else { "HTTP/1.1" }
             );
@@ -48,7 +49,7 @@ pub async fn http_reqwest(
         };
 
         loop {
-            let mut req = Request::new(opts.method.clone(), url.clone());
+            let mut req = Request::new(opts.method.clone().unwrap_or(http::Method::GET), url.clone());
             *req.headers_mut() = headers.clone();
 
             if let Some(ref body) = body {
