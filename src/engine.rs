@@ -318,6 +318,13 @@ async fn spawn_tasks(
         let stats = Arc::clone(&rt_stats);
 
         match opts.client_type {
+            ClientType::Auto => {
+                if opts.body.len() > 1 {
+                    tasks.spawn(async move { http_hyper_multichunk(id, con, opts, &stats[id]).await });
+                } else {
+                    tasks.spawn(async move { http_hyper(id, con, opts, &stats[id]).await });
+                }
+            }
             ClientType::Hyper => {
                 tasks.spawn(async move { http_hyper(id, con, opts, &stats[id]).await });
             }

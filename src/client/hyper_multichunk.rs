@@ -62,7 +62,7 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
         if cid < opts.uri.len() && !banner.contains(uri_str) {
             banner.insert(uri_str.to_owned());
             println!(
-                "hyper [{tid:>2}] -> connecting to {}:{}, uri = {} HTTP/1.1...",
+                "hyper-multichunk [{tid:>2}] -> connecting to {}:{}, uri = {} HTTP/1.1...",
                 host, port, uri
             );
         }

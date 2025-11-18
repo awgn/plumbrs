@@ -9,6 +9,7 @@ use clap::ValueEnum;
 
 #[derive(ValueEnum, Debug, Copy, Clone)]
 pub enum ClientType {
+    Auto,
     HyperLegacy,
     HyperMultichunk,
     HyperRt1,
@@ -21,6 +22,7 @@ pub enum ClientType {
 impl std::fmt::Display for ClientType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            ClientType::Auto => write!(f, "auto"),
             ClientType::Hyper => write!(f, "hyper"),
             ClientType::HyperLegacy => write!(f, "hyper-legacy"),
             ClientType::HyperMultichunk=> write!(f, "hyper-multichunk"),

@@ -42,7 +42,8 @@ fn enforce_consistency(opts: &Options) -> Result<()> {
     }
 
     match opts.client_type {
-        ClientType::HyperLegacy
+        ClientType::Auto
+        | ClientType::HyperLegacy
         | ClientType::Hyper
         | ClientType::HyperRt1
         | ClientType::HyperH2
@@ -57,20 +58,31 @@ fn enforce_consistency(opts: &Options) -> Result<()> {
         ClientType::Reqwest if !opts.trailers.is_empty() => {
             return Err(anyhow!("Trailers not supported with reqwest client!"));
         }
+        ClientType::Hyper
+        | ClientType::HyperLegacy
+        | ClientType::HyperRt1
+        | ClientType::HyperH2
+        | ClientType::Reqwest
+        if opts.body.len() > 1=>
+        {
+            return Err(anyhow!(
+                "Multi-chunked body only supported with hyper-multichunk client!"
+            ));
+        }
         ClientType::Help => {
             println!("Available client types:");
-            println!("  hyper         - Hyper client, one per connection. Both HTTP/1 and HTTP/2");
+            println!("  hyper             - Hyper client, one per connection. Both HTTP/1 and HTTP/2");
             println!("  hyper-multichunk  - Hyper client, one per connection, with multi-chunked body. Both HTTP/1 and HTTP/2");
             println!(
-                "  hyper-h2      - Hyper client, one per connection. Use h2 package, HTTP/2 only"
+                "  hyper-h2          - Hyper client, one per connection. Use h2 package, HTTP/2 only"
             );
             println!(
-                "  hyper-legacy  - Hyper client (legacy), one per connection. Both HTTP/1 and HTTP/2"
+                "  hyper-legacy      - Hyper client (legacy), one per connection. Both HTTP/1 and HTTP/2"
             );
             println!(
-                "  hyper-rt1     - Hyper client (legacy), one per runtime. Both HTTP/1 and HTTP/2"
+                "  hyper-rt1         - Hyper client (legacy), one per runtime. Both HTTP/1 and HTTP/2"
             );
-            println!("  reqwest       - Reqwest client, one per runtime. Both HTTP/1 and HTTP/2");
+            println!("  reqwest           - Reqwest client, one per runtime. Both HTTP/1 and HTTP/2");
             std::process::exit(0);
         }
         _ => (),

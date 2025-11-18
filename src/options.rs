@@ -42,7 +42,7 @@ pub struct Options {
         long = "requests"
     )]
     pub requests: Option<u32>,
-    #[arg(help = "Http Client", short = 'C', long = "client", default_value_t = ClientType::Hyper)]
+    #[arg(help = "Http Client", short = 'C', long = "client", default_value_t = ClientType::Auto)]
     pub client_type: ClientType,
     #[arg(
         help = "Tokio global queue interval (ticks)",
