@@ -2,17 +2,21 @@ use crate::Options;
 use crate::stats::{RealtimeStats, Statistics};
 
 use std::collections::HashSet;
+use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Instant;
 
 use bytes::Bytes;
 use http::{Request, StatusCode};
+use hyper::body::Frame;
 
 use crate::client::utils::*;
 use crate::fatal;
-use http_body_util::{BodyExt, Either, Full};
+use http_body_util::{BodyExt, Either, StreamBody};
+use futures_util::stream;
+use futures_util::StreamExt;
 
-pub async fn http_hyper(
+pub async fn http_hyper_multichunk(
     tid: usize,
     cid: usize,
     opts: Arc<Options>,
@@ -47,7 +51,7 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
     let trailers = build_trailers(opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build trailers: {e}"));
 
-    let body : Full<Bytes> = opts.body.iter().next().map(|b| b.clone().into()).unwrap_or_default();
+    let chunks : Vec<Bytes> = opts.body.clone().into_iter().map(Bytes::from).collect();
 
     let start = Instant::now();
     'connection: loop {
@@ -74,10 +78,17 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
 
         loop {
             let body = match &trailers {
-                None => Either::Left(body.clone()),
+                None => {
+                    let stream = stream::iter(chunks.clone()).map(|chunk| Ok::<_, Infallible>(Frame::data(chunk)));
+                    let body = StreamBody::new(stream);
+                    Either::Left(body)
+                },
                 tr => {
                     let trailers = tr.clone().map(Result::Ok);
-                    Either::Right(body.clone().with_trailers(std::future::ready(trailers)))
+                    let stream = stream::iter(chunks.clone())
+                            .map(|chunk| Ok::<_, Infallible>(Frame::data(chunk)));
+                    let body = StreamBody::new(stream);
+                    Either::Right(body.with_trailers(std::future::ready(trailers)))
                 }
             };
 

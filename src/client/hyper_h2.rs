@@ -33,11 +33,7 @@ pub async fn http_hyper_h2(
         .parse::<hyper::Uri>()
         .unwrap_or_else(|e| fatal!(1, "invalid uri: {e}"));
 
-    let body = if let Some(body) = &opts.body {
-        body.clone().into()
-    } else {
-        Bytes::new()
-    };
+    let body : Bytes = opts.body.iter().next().map(|b| b.clone().into()).unwrap_or_else(|| Bytes::new());
 
     // http/2 use :authority: instead of Host header...
     let headers = build_headers(None, opts.as_ref())

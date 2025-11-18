@@ -1,6 +1,6 @@
 [package]
 name = "plumbrs"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2024"
 
 [patch.crates-io]
@@ -26,6 +26,7 @@ atomic-time = "0.1.5"
 scopeguard = "1.2.0"
 crossterm = "0.28"
 hdrhistogram = "7.5.4"
+futures-util = "0.3.31"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = { version = "0.6" }

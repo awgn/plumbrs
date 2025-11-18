@@ -23,7 +23,7 @@ pub async fn http_reqwest(
     let headers = build_headers(None, opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
 
-    let body = opts.body.clone();
+    let body = opts.body.iter().next().map(|b| b.clone());
 
     let start = Instant::now();
     'connection: loop {

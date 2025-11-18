@@ -1,6 +1,7 @@
 use crate::Options;
 use crate::client::ClientType;
 use crate::client::hyper::*;
+use crate::client::hyper_multichunk::http_hyper_multichunk;
 use crate::client::hyper_rt1::{RequestBody, http_hyper_rt1};
 use crate::client::hyper_h2::*;
 use crate::client::hyper_legacy::*;
@@ -319,6 +320,9 @@ async fn spawn_tasks(
         match opts.client_type {
             ClientType::Hyper => {
                 tasks.spawn(async move { http_hyper(id, con, opts, &stats[id]).await });
+            }
+            ClientType::HyperMultichunk => {
+                tasks.spawn(async move { http_hyper_multichunk(id, con, opts, &stats[id]).await });
             }
             ClientType::HyperLegacy => {
                 tasks.spawn(async move { http_hyper_legacy(id, con, opts, &stats[id]).await });

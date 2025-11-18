@@ -65,8 +65,8 @@ pub struct Options {
     pub headers: Vec<(String, String)>,
     #[arg(help = "HTTP trailers", short = 'T', long = "trailer", value_parser = parse_key_val)]
     pub trailers: Vec<(String, String)>,
-    #[arg(help = "Body of the request", short = 'B', long = "body")]
-    pub body: Option<String>,
+    #[arg(help = "Body of the request (can be repeated multiple times as chunks)", short = 'B', long = "body")]
+    pub body: Vec<String>,
     #[arg(
         help = "Open a new connection for every request, computing Connections Per Second",
         long = "cps",

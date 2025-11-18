@@ -60,6 +60,7 @@ fn enforce_consistency(opts: &Options) -> Result<()> {
         ClientType::Help => {
             println!("Available client types:");
             println!("  hyper         - Hyper client, one per connection. Both HTTP/1 and HTTP/2");
+            println!("  hyper-multichunk  - Hyper client, one per connection, with multi-chunked body. Both HTTP/1 and HTTP/2");
             println!(
                 "  hyper-h2      - Hyper client, one per connection. Use h2 package, HTTP/2 only"
             );

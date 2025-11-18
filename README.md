@@ -9,6 +9,7 @@ Plumbrs provides ready-to-use benchmarking tasks for several popular HTTP client
 ### Built-in clients
 
 1. Hyper (`hyper`) — Hyper-based HTTP client (one per connection).
+1. Hyper (`hyper-multichunk`) — Hyper-based HTTP client with multi-chunked body (one per connection).
 2. Hyper (legacy) (`hyper-legacy`) — Legacy Hyper HTTP client (one per connection).
 3. Hyper (legacy, one per runtime) (`hyper-rt1`) — Legacy Hyper HTTP client shared across a runtime.
 4. Hyper + h2 (`hyper-h2`) — HTTP/2 client using Hyper with the h2 library (one per connection).
