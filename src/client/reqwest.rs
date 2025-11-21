@@ -106,6 +106,16 @@ pub fn build_http_client(opts: &Options, headers: &HeaderMap) -> Result<Client> 
             builder = builder.http1_only();
         }
         builder = builder.http2_adaptive_window(opts.http2_adaptive_window.unwrap_or(false));
+        
+        // Apply additional HTTP/2 options
+        // Note: reqwest doesn't expose initial_max_send_streams, max_concurrent_reset_streams, or max_send_buffer_size
+        builder = builder.http2_initial_stream_window_size(opts.http2_initial_stream_window_size);
+        builder = builder.http2_initial_connection_window_size(opts.http2_initial_connection_window_size);
+        builder = builder.http2_max_frame_size(opts.http2_max_frame_size);
+        if let Some(v) = opts.http2_max_header_list_size {
+            builder = builder.http2_max_header_list_size(v);
+        }
+        builder = builder.http2_keep_alive_while_idle(opts.http2_keep_alive_while_idle);
     }
     builder.build()
 }

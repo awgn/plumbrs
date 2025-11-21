@@ -267,12 +267,19 @@ impl HttpConnectionBuilder for Http2 {
         // set http2 connection options...
         builder.adaptive_window(opts.http2_adaptive_window.unwrap_or(false));
         builder.initial_max_send_streams(opts.http2_initial_max_send_streams);
-        if let Some(v) = opts.http2_max_concurrent_streams {
-            builder.max_concurrent_streams(v);
-        }
         if let Some(v) = opts.http2_max_concurrent_reset_streams {
             builder.max_concurrent_reset_streams(v);
         }
+        builder.initial_stream_window_size(opts.http2_initial_stream_window_size);
+        builder.initial_connection_window_size(opts.http2_initial_connection_window_size);
+        builder.max_frame_size(opts.http2_max_frame_size);
+        if let Some(v) = opts.http2_max_header_list_size {
+            builder.max_header_list_size(v);
+        }
+        if let Some(v) = opts.http2_max_send_buffer_size {
+            builder.max_send_buf_size(v);
+        }
+        builder.keep_alive_while_idle(opts.http2_keep_alive_while_idle);
 
         let conn_res = builder.handshake(stream).await;
         let (sender, connection) = match conn_res {
@@ -303,12 +310,19 @@ where
         builder.http2_only(opts.http2);
         builder.http2_adaptive_window(opts.http2_adaptive_window.unwrap_or(false));
         builder.http2_initial_max_send_streams(opts.http2_initial_max_send_streams);
-        if let Some(v) = opts.http2_max_concurrent_streams {
-            builder.http2_max_concurrent_streams(v);
-        }
         if let Some(v) = opts.http2_max_concurrent_reset_streams {
             builder.http2_max_concurrent_reset_streams(v);
         }
+        builder.http2_initial_stream_window_size(opts.http2_initial_stream_window_size);
+        builder.http2_initial_connection_window_size(opts.http2_initial_connection_window_size);
+        builder.http2_max_frame_size(opts.http2_max_frame_size);
+        if let Some(v) = opts.http2_max_header_list_size {
+            builder.http2_max_header_list_size(v);
+        }
+        if let Some(v) = opts.http2_max_send_buffer_size {
+            builder.http2_max_send_buf_size(v);
+        }
+        builder.http2_keep_alive_while_idle(opts.http2_keep_alive_while_idle);
         #[cfg(feature = "orion_client")]
         builder.http2_connection_sharing(opts.http2_can_share);
     }

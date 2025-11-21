@@ -87,10 +87,20 @@ pub struct Options {
         long
     )]
     pub http2_initial_max_send_streams: Option<usize>,
-    #[arg(help = "Sets the initial max concurrent stream.", long)]
-    pub http2_max_concurrent_streams: Option<u32>,
     #[arg(help = "Sets the initial maximum of concurrently reset streams.", long)]
     pub http2_max_concurrent_reset_streams: Option<usize>,
+    #[arg(help = "Sets the initial window size for HTTP/2 stream-level flow control.", long)]
+    pub http2_initial_stream_window_size: Option<u32>,
+    #[arg(help = "Sets the initial window size for HTTP/2 connection-level flow control.", long)]
+    pub http2_initial_connection_window_size: Option<u32>,
+    #[arg(help = "Sets the maximum frame size for HTTP/2.", long)]
+    pub http2_max_frame_size: Option<u32>,
+    #[arg(help = "Sets the maximum header list size for HTTP/2.", long)]
+    pub http2_max_header_list_size: Option<u32>,
+    #[arg(help = "Sets the maximum send buffer size for HTTP/2.", long)]
+    pub http2_max_send_buffer_size: Option<usize>,
+    #[arg(help = "Enables HTTP/2 keep-alive while idle.", long)]
+    pub http2_keep_alive_while_idle: bool,
     #[cfg(feature = "orion_client")]
     #[arg(help = "Set if http2 can share connection", long)]
     pub http2_can_share: bool,

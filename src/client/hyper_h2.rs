@@ -68,7 +68,33 @@ pub async fn http_hyper_h2(
             }
         };
 
-        let conn = h2::client::Builder::new()
+        let mut h2_builder = h2::client::Builder::new();
+        
+        // Configure HTTP/2 options
+        // Note: h2 doesn't have adaptive_window option, only hyper does
+        if let Some(v) = opts.http2_initial_max_send_streams {
+            h2_builder.initial_max_send_streams(v);
+        }
+        if let Some(v) = opts.http2_max_concurrent_reset_streams {
+            h2_builder.max_concurrent_reset_streams(v);
+        }
+        if let Some(v) = opts.http2_initial_stream_window_size {
+            h2_builder.initial_window_size(v);
+        }
+        if let Some(v) = opts.http2_initial_connection_window_size {
+            h2_builder.initial_connection_window_size(v);
+        }
+        if let Some(v) = opts.http2_max_frame_size {
+            h2_builder.max_frame_size(v);
+        }
+        if let Some(v) = opts.http2_max_header_list_size {
+            h2_builder.max_header_list_size(v);
+        }
+        if let Some(v) = opts.http2_max_send_buffer_size {
+            h2_builder.max_send_buffer_size(v);
+        }
+        
+        let conn = h2_builder
             .handshake::<_, bytes::Bytes>(stream)
             .await;
         let (mut h2_client, mut connection) = match conn {
@@ -175,7 +201,33 @@ pub async fn http_hyper_h2(
                         continue 'connection;
                     }
                 };
-                let conn = h2::client::Builder::new()
+                let mut h2_builder = h2::client::Builder::new();
+                
+                // Configure HTTP/2 options
+                // Note: h2 doesn't have adaptive_window option, only hyper does
+                if let Some(v) = opts.http2_initial_max_send_streams {
+                    h2_builder.initial_max_send_streams(v);
+                }
+                if let Some(v) = opts.http2_max_concurrent_reset_streams {
+                    h2_builder.max_concurrent_reset_streams(v);
+                }
+                if let Some(v) = opts.http2_initial_stream_window_size {
+                    h2_builder.initial_window_size(v);
+                }
+                if let Some(v) = opts.http2_initial_connection_window_size {
+                    h2_builder.initial_connection_window_size(v);
+                }
+                if let Some(v) = opts.http2_max_frame_size {
+                    h2_builder.max_frame_size(v);
+                }
+                if let Some(v) = opts.http2_max_header_list_size {
+                    h2_builder.max_header_list_size(v);
+                }
+                if let Some(v) = opts.http2_max_send_buffer_size {
+                    h2_builder.max_send_buffer_size(v);
+                }
+                
+                let conn = h2_builder
                     .handshake::<_, bytes::Bytes>(stream)
                     .await;
                 (h2_client, connection) = match conn {
