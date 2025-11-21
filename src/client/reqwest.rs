@@ -102,9 +102,6 @@ pub async fn http_reqwest(
 pub fn build_http_client(opts: &Options, headers: &HeaderMap) -> Result<Client> {
     let mut builder = ClientBuilder::new().default_headers(headers.clone());
     if opts.http2 {
-        if !opts.http2 {
-            builder = builder.http1_only();
-        }
         builder = builder.http2_adaptive_window(opts.http2_adaptive_window.unwrap_or(false));
         
         // Apply additional HTTP/2 options
@@ -116,6 +113,23 @@ pub fn build_http_client(opts: &Options, headers: &HeaderMap) -> Result<Client> 
             builder = builder.http2_max_header_list_size(v);
         }
         builder = builder.http2_keep_alive_while_idle(opts.http2_keep_alive_while_idle);
+    } else {
+        // Configure HTTP/1 options
+        if opts.http1_title_case_headers {
+            builder = builder.http1_title_case_headers();
+        }
+        if opts.http1_allow_obsolete_multiline_headers_in_responses {
+            builder = builder.http1_allow_obsolete_multiline_headers_in_responses(true);
+        }
+        if opts.http1_ignore_invalid_headers_in_responses {
+            builder = builder.http1_ignore_invalid_headers_in_responses(true);
+        }
+        if opts.http1_allow_spaces_after_header_name_in_responses {
+            builder = builder.http1_allow_spaces_after_header_name_in_responses(true);
+        }
+        if opts.http09_responses {
+            builder = builder.http09_responses();
+        }
     }
     builder.build()
 }

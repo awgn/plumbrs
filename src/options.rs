@@ -101,6 +101,26 @@ pub struct Options {
     pub http2_max_send_buffer_size: Option<usize>,
     #[arg(help = "Enables HTTP/2 keep-alive while idle.", long)]
     pub http2_keep_alive_while_idle: bool,
+    #[arg(help = "Sets the maximum buffer size for HTTP/1.", long)]
+    pub http1_max_buf_size: Option<usize>,
+    #[arg(help = "Sets the exact size of the read buffer to always use for HTTP/1.", long)]
+    pub http1_read_buf_exact_size: Option<usize>,
+    #[arg(help = "Set whether HTTP/1 connections should try to use vectored writes.", long)]
+    pub http1_writev: Option<bool>,
+    #[arg(help = "Set whether HTTP/1 connections will write header names as title case.", long)]
+    pub http1_title_case_headers: bool,
+    #[arg(help = "Set whether to support preserving original header cases for HTTP/1.", long)]
+    pub http1_preserve_header_case: bool,
+    #[arg(help = "Set the maximum number of headers for HTTP/1.", long)]
+    pub http1_max_headers: Option<usize>,
+    #[arg(help = "Set whether HTTP/1 connections will accept spaces after header name in responses.", long)]
+    pub http1_allow_spaces_after_header_name_in_responses: bool,
+    #[arg(help = "Set whether HTTP/1 connections will accept obsolete line folding for header values.", long)]
+    pub http1_allow_obsolete_multiline_headers_in_responses: bool,
+    #[arg(help = "Set whether HTTP/1 connections will silently ignore malformed header lines.", long)]
+    pub http1_ignore_invalid_headers_in_responses: bool,
+    #[arg(help = "Set whether HTTP/0.9 responses should be tolerated.", long)]
+    pub http09_responses: bool,
     #[arg(
         help = "Set the host to benchmark (e.g. http://192.168.0.1:8080)",
         long = "host"

@@ -77,6 +77,58 @@ Plumbrs provides ready-to-use benchmarking tasks for several popular HTTP client
 - `--cps`
   Open a new connection for every request, measuring Connections Per Second (CPS).
 
+## HTTP/1 options
+
+- `--http1-max-buf-size <NUMBER>`
+  Set the maximum buffer size for HTTP/1.
+  Default is ~400kb.
+
+- `--http1-read-buf-exact-size <NUMBER>`
+  Set the exact size of the read buffer to always use for HTTP/1.
+  Note: Setting this option unsets the `http1-max-buf-size` option.
+
+- `--http1-writev <true|false>`
+  Set whether HTTP/1 connections should try to use vectored writes.
+  Default is `auto` (hyper will try to guess which mode to use).
+
+- `--http1-title-case-headers`
+  Set whether HTTP/1 connections will write header names as title case at the socket level.
+
+- `--http1-preserve-header-case`
+  Set whether to support preserving original header cases for HTTP/1.
+  Note: Not available with `hyper-legacy` or `hyper-rt1` clients.
+
+- `--http1-max-headers <NUMBER>`
+  Set the maximum number of headers for HTTP/1.
+  Default is 100.
+
+- `--http1-allow-spaces-after-header-name-in-responses`
+  Set whether HTTP/1 connections will accept spaces between header names and the colon that follows them in responses.
+
+- `--http1-allow-obsolete-multiline-headers-in-responses`
+  Set whether HTTP/1 connections will accept obsolete line folding for header values.
+
+- `--http1-ignore-invalid-headers-in-responses`
+  Set whether HTTP/1 connections will silently ignore malformed header lines.
+
+- `--http09-responses`
+  Set whether HTTP/0.9 responses should be tolerated.
+
+### HTTP/1 options compatibility table
+
+| Option | hyper | hyper-legacy | hyper-rt1 | reqwest |
+|--------|-------|--------------|-----------|---------|
+| `--http1-max-buf-size` | ✅ | ✅ | ✅ | ❌ |
+| `--http1-read-buf-exact-size` | ✅ | ✅ | ✅ | ❌ |
+| `--http1-writev` | ✅ | ✅ | ✅ | ❌ |
+| `--http1-title-case-headers` | ✅ | ✅ | ✅ | ✅ |
+| `--http1-preserve-header-case` | ✅ | ✅ | ✅ | ❌ |
+| `--http1-max-headers` | ✅ | ✅ | ✅ | ❌ |
+| `--http1-allow-spaces-after-header-name-in-responses` | ✅ | ✅ | ✅ | ✅ |
+| `--http1-allow-obsolete-multiline-headers-in-responses` | ✅ | ✅ | ✅ | ✅ |
+| `--http1-ignore-invalid-headers-in-responses` | ✅ | ✅ | ✅ | ✅ |
+| `--http09-responses` | ✅ | ✅ | ✅ | ✅ |
+
 ## HTTP/2 options
 
 - `--http2`
@@ -191,6 +243,15 @@ plumbrs --cps -c 10 -r 1000 http://localhost:8080
 List available client types:
 ```bash
 plumbrs -T help
+```
+
+HTTP/1 with custom buffer size and header options:
+```bash
+plumbrs -T hyper \
+  --http1-max-buf-size 524288 \
+  --http1-title-case-headers \
+  --http1-max-headers 150 \
+  -c 100 -d 30 http://localhost:8080
 ```
 
 ## Enabling Tokio unstable APIs

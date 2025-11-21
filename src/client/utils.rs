@@ -193,7 +193,7 @@ impl HttpConnectionBuilder for Http1 {
         endpoint: &'static str,
         stats: &mut Statistics,
         rt_stats: &RealtimeStats,
-        _opts: &Options,
+        opts: &Options,
     ) -> Option<(Self::Sender<B>, tokio::task::JoinHandle<()>)>
     where
         B: Body + Send + Unpin + 'static,
@@ -211,7 +211,40 @@ impl HttpConnectionBuilder for Http1 {
             }
         };
         let stream = TokioIo::new(stream);
-        let builder = conn1::Builder::new();
+        let mut builder = conn1::Builder::new();
+        
+        // Configure HTTP/1 options
+        if let Some(v) = opts.http1_max_buf_size {
+            builder.max_buf_size(v);
+        }
+        if let Some(v) = opts.http1_read_buf_exact_size {
+            builder.read_buf_exact_size(Some(v));
+        }
+        if let Some(v) = opts.http1_writev {
+            builder.writev(v);
+        }
+        if opts.http1_title_case_headers {
+            builder.title_case_headers(true);
+        }
+        if opts.http1_preserve_header_case {
+            builder.preserve_header_case(true);
+        }
+        if let Some(v) = opts.http1_max_headers {
+            builder.max_headers(v);
+        }
+        if opts.http1_allow_spaces_after_header_name_in_responses {
+            builder.allow_spaces_after_header_name_in_responses(true);
+        }
+        if opts.http1_allow_obsolete_multiline_headers_in_responses {
+            builder.allow_obsolete_multiline_headers_in_responses(true);
+        }
+        if opts.http1_ignore_invalid_headers_in_responses {
+            builder.ignore_invalid_headers_in_responses(true);
+        }
+        if opts.http09_responses {
+            builder.http09_responses(true);
+        }
+        
         let conn_res = builder.handshake(stream).await;
         let (sender, connection) = match conn_res {
             Ok(p) => p,
@@ -323,6 +356,39 @@ where
             builder.http2_max_send_buf_size(v);
         }
         builder.http2_keep_alive_while_idle(opts.http2_keep_alive_while_idle);
+    } else {
+        // Configure HTTP/1 options
+        if let Some(v) = opts.http1_max_buf_size {
+            builder.http1_max_buf_size(v);
+        }
+        if let Some(v) = opts.http1_read_buf_exact_size {
+            builder.http1_read_buf_exact_size(v);
+        }
+        if let Some(v) = opts.http1_writev {
+            builder.http1_writev(v);
+        }
+        if opts.http1_title_case_headers {
+            builder.http1_title_case_headers(true);
+        }
+        if opts.http1_preserve_header_case {
+            builder.http1_preserve_header_case(true);
+        }
+        if let Some(v) = opts.http1_max_headers {
+            builder.http1_max_headers(v);
+        }
+        if opts.http1_allow_spaces_after_header_name_in_responses {
+            builder.http1_allow_spaces_after_header_name_in_responses(true);
+        }
+        if opts.http1_allow_obsolete_multiline_headers_in_responses {
+            builder.http1_allow_obsolete_multiline_headers_in_responses(true);
+        }
+        if opts.http1_ignore_invalid_headers_in_responses {
+            builder.http1_ignore_invalid_headers_in_responses(true);
+        }
+        if opts.http09_responses {
+            builder.http09_responses(true);
+        }
     }
     builder.build_http()
 }
+
