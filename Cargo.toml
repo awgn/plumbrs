@@ -1,6 +1,6 @@
 [package]
 name = "plumbrs"
-version = "0.5.3"
+version = "0.5.4"
 edition = "2024"
 authors = ["Nicola Bonelli <nicola@larthia.com>"]
 description = "A high-performance HTTP/1.1 and HTTP/2 benchmarking tool"
@@ -9,6 +9,8 @@ repository = "https://github.com/awgn/plumbrs"
 readme = "README.md"
 keywords = ["cli", "utility", "benchmark", "http", "http2"]
 categories = ["command-line-utilities", "network-programming"]
+
+
 
 [patch.crates-io]
 hyper-util   = { git = "https://github.com/awgn/hyper-util.git", rev = "76db6ec" }

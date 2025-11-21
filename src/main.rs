@@ -24,23 +24,6 @@ fn main() -> Result<()> {
 }
 
 fn enforce_consistency(opts: &mut Options) -> Result<()> {
-    #[cfg(feature = "orion_client")]
-    if opts.http2_can_share && !opts.http2 {
-        return Err(anyhow!(
-            "HTTP2 (--http2) must be enabled to allow connection sharing!"
-        ));
-    }
-
-    #[cfg(feature = "orion_client")]
-    if opts.http2_can_share
-        && !matches!(opts.client_type, ClientType::HyperLegacy)
-        && !matches!(opts.client_type, ClientType::Hyperrt1)
-    {
-        return Err(anyhow!(
-            "HTTP2 Connection sharing only available with hyper-legacy or hyper-rt1 client!"
-        ));
-    }
-
     if matches!(opts.method, Some(http::Method::TRACE)) && opts.body.len() > 1  {
         return Err(anyhow!("TRACE method cannot have a body!"));
     }

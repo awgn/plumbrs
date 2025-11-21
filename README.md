@@ -84,22 +84,49 @@ Plumbrs provides ready-to-use benchmarking tasks for several popular HTTP client
 
 - `--http2-adaptive-window <true|false>`
   Enable or disable adaptive flow control for HTTP/2.
+  Note: Not available with `hyper-h2` client.
 
 - `--http2-initial-max-send-streams <NUMBER>`
   Set the initial maximum number of locally initiated (send) streams.
-
-- `--http2-max-concurrent-streams <NUMBER>`
-  Set the initial maximum number of concurrent streams.
+  Note: Not available with `reqwest` client.
 
 - `--http2-max-concurrent-reset-streams <NUMBER>`
   Set the initial maximum number of concurrently reset streams.
+  Note: Not available with `reqwest` client.
 
-- `--http2-can-share` (feature-gated; see Feature flags)
-  Allow HTTP/2 connection sharing.
-  Notes:
-  - Requires `--http2`.
-  - Available only with `hyper-legacy` or `hyper-rt1`.
-  - Available only when built with the `orion_client` feature flag.
+- `--http2-initial-stream-window-size <NUMBER>`
+  Set the initial window size for HTTP/2 stream-level flow control.
+
+- `--http2-initial-connection-window-size <NUMBER>`
+  Set the initial window size for HTTP/2 connection-level flow control.
+
+- `--http2-max-frame-size <NUMBER>`
+  Set the maximum frame size for HTTP/2.
+
+- `--http2-max-header-list-size <NUMBER>`
+  Set the maximum header list size for HTTP/2.
+
+- `--http2-max-send-buffer-size <NUMBER>`
+  Set the maximum send buffer size for HTTP/2.
+  Note: Not available with `reqwest` client.
+
+- `--http2-keep-alive-while-idle`
+  Enable HTTP/2 keep-alive while the connection is idle.
+  Note: Not available with `hyper-h2` client.
+
+### HTTP/2 options compatibility table
+
+| Option | hyper | hyper-h2 | hyper-legacy | hyper-rt1 | reqwest |
+|--------|-------|----------|--------------|-----------|---------|
+| `--http2-adaptive-window` | ✅ | ❌ | ✅ | ✅ | ✅ |
+| `--http2-initial-max-send-streams` | ✅ | ✅ | ✅ | ✅ | ❌ |
+| `--http2-max-concurrent-reset-streams` | ✅ | ✅ | ✅ | ✅ | ❌ |
+| `--http2-initial-stream-window-size` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `--http2-initial-connection-window-size` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `--http2-max-frame-size` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `--http2-max-header-list-size` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `--http2-max-send-buffer-size` | ✅ | ✅ | ✅ | ✅ | ❌ |
+| `--http2-keep-alive-while-idle` | ✅ | ❌ | ✅ | ✅ | ✅ |
 
 ## Tokio runtime options
 
@@ -128,18 +155,8 @@ The following CLI constraints are enforced at runtime:
   - `--host` is not available with `hyper-legacy` or `hyper-rt1`.
 - CPS restriction:
   - `--cps` can only be used with `--client-type hyper`.
-- HTTP/2 connection sharing (`--http2-can-share`) restrictions:
-  - Requires `--http2`.
-  - Only valid with `--client-type hyper-legacy` or `--client-type hyper-rt1`.
-  - Only available when compiled with the `orion_client` feature flag.
 - Threading consistency:
   - When `--multi-threaded <N>` is provided, `--threads` must be an exact multiple of `<N>`.
-
-## Feature flags
-
-- `orion_client`
-  - Enables the `--http2-can-share` option (HTTP/2 connection sharing).
-  - Without this feature, `--http2-can-share` is not available.
 
 ## Examples
 
@@ -155,9 +172,15 @@ plumbrs -t 4 -c 100 -M POST \
   -B '{"key":"value"}' http://localhost:8080/api
 ```
 
-HTTP/2 benchmark with connection sharing (requires `--features orion_client` and `--http2`):
+HTTP/2 with advanced flow control and tuning options:
 ```bash
-plumbrs -T hyper-legacy --http2 --http2-can-share -c 50 -d 60 http://localhost:8080
+plumbrs -T hyper --http2 \
+  --http2-adaptive-window true \
+  --http2-initial-stream-window-size 1048576 \
+  --http2-initial-connection-window-size 2097152 \
+  --http2-max-frame-size 32768 \
+  --http2-keep-alive-while-idle \
+  -c 100 -d 30 http://localhost:8080
 ```
 
 Connections Per Second (CPS) test:
@@ -176,10 +199,3 @@ Some runtime options require Tokio’s unstable APIs. Build with:
 ```bash
 RUSTFLAGS="--cfg tokio_unstable" cargo build --release
 ```
-## Feature-gated HTTP/2 connection sharing
-
-The `--http2-can-share` option is available only when compiled with the `orion_client` feature:
-```bash
-cargo build --release --features orion_client
-```
-It also requires `--http2` and is only valid with `hyper-legacy` or `hyper-rt1`.

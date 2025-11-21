@@ -323,8 +323,6 @@ where
             builder.http2_max_send_buf_size(v);
         }
         builder.http2_keep_alive_while_idle(opts.http2_keep_alive_while_idle);
-        #[cfg(feature = "orion_client")]
-        builder.http2_connection_sharing(opts.http2_can_share);
     }
     builder.build_http()
 }

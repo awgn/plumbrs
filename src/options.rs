@@ -101,9 +101,6 @@ pub struct Options {
     pub http2_max_send_buffer_size: Option<usize>,
     #[arg(help = "Enables HTTP/2 keep-alive while idle.", long)]
     pub http2_keep_alive_while_idle: bool,
-    #[cfg(feature = "orion_client")]
-    #[arg(help = "Set if http2 can share connection", long)]
-    pub http2_can_share: bool,
     #[arg(
         help = "Set the host to benchmark (e.g. http://192.168.0.1:8080)",
         long = "host"
