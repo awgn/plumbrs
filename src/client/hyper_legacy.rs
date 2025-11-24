@@ -34,7 +34,7 @@ pub async fn http_hyper_legacy(
     let trailers = build_trailers(opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build trailers: {e}"));
 
-    let body : Full<Bytes> = opts.body.iter().next().map(|b| b.clone().into()).unwrap_or_default();
+    let body : Full<Bytes> = opts.body.first().map(|b| b.clone().into()).unwrap_or_default();
 
     let start = Instant::now();
     'connection: loop {

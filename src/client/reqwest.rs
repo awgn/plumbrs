@@ -23,7 +23,7 @@ pub async fn http_reqwest(
     let headers = build_headers(None, opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
 
-    let body = opts.body.iter().next().map(|b| b.clone());
+    let body = opts.body.first().cloned();
 
     let start = Instant::now();
     'connection: loop {
@@ -103,7 +103,7 @@ pub fn build_http_client(opts: &Options, headers: &HeaderMap) -> Result<Client> 
     let mut builder = ClientBuilder::new().default_headers(headers.clone());
     if opts.http2 {
         builder = builder.http2_adaptive_window(opts.http2_adaptive_window.unwrap_or(false));
-        
+
         // Apply additional HTTP/2 options
         // Note: reqwest doesn't expose initial_max_send_streams, max_concurrent_reset_streams, or max_send_buffer_size
         builder = builder.http2_initial_stream_window_size(opts.http2_initial_stream_window_size);

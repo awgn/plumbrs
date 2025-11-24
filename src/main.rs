@@ -28,7 +28,7 @@ fn enforce_consistency(opts: &mut Options) -> Result<()> {
         return Err(anyhow!("TRACE method cannot have a body!"));
     }
 
-    if matches!(opts.method, None) {
+    if opts.method.is_none() {
         if opts.body.is_empty()  {
             opts.method = Some(http::Method::GET);
         }

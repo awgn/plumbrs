@@ -65,7 +65,8 @@ Plumbrs provides ready-to-use benchmarking tasks for several popular HTTP client
   Note: Not available with `reqwest` client.
 
 - `-B, --body <BODY>`
-  Body content for the HTTP request.
+  Body content for the HTTP request. If repeated multiple times, chunked transfer encoding
+  is used.
 
 - `--host <HOST>`
   Set the host to benchmark (for example, `http://192.168.0.1:8080`).
@@ -203,9 +204,6 @@ Plumbrs provides ready-to-use benchmarking tasks for several popular HTTP client
 
 - `--max-io-events-per-tick <NUMBER>`
   Maximum number of I/O events processed per tick.
-
-- `--multi-thread-alt` (requires `tokio_unstable`)
-  Use Tokio’s alternate multi-thread scheduler.
 
 - `--disable-lifo-slot` (requires `tokio_unstable`)
   Disable Tokio’s LIFO slot heuristic.

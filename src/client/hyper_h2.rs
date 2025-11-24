@@ -33,7 +33,7 @@ pub async fn http_hyper_h2(
         .parse::<hyper::Uri>()
         .unwrap_or_else(|e| fatal!(1, "invalid uri: {e}"));
 
-    let body : Bytes = opts.body.iter().next().map(|b| b.clone().into()).unwrap_or_else(|| Bytes::new());
+    let body : Bytes = opts.body.first().map(|b| b.clone().into()).unwrap_or_default();
 
     // http/2 use :authority: instead of Host header...
     let headers = build_headers(None, opts.as_ref())
@@ -69,7 +69,7 @@ pub async fn http_hyper_h2(
         };
 
         let mut h2_builder = h2::client::Builder::new();
-        
+
         // Configure HTTP/2 options
         // Note: h2 doesn't have adaptive_window option, only hyper does
         if let Some(v) = opts.http2_initial_max_send_streams {
@@ -93,7 +93,7 @@ pub async fn http_hyper_h2(
         if let Some(v) = opts.http2_max_send_buffer_size {
             h2_builder.max_send_buffer_size(v);
         }
-        
+
         let conn = h2_builder
             .handshake::<_, bytes::Bytes>(stream)
             .await;
@@ -202,7 +202,7 @@ pub async fn http_hyper_h2(
                     }
                 };
                 let mut h2_builder = h2::client::Builder::new();
-                
+
                 // Configure HTTP/2 options
                 // Note: h2 doesn't have adaptive_window option, only hyper does
                 if let Some(v) = opts.http2_initial_max_send_streams {
@@ -226,7 +226,7 @@ pub async fn http_hyper_h2(
                 if let Some(v) = opts.http2_max_send_buffer_size {
                     h2_builder.max_send_buffer_size(v);
                 }
-                
+
                 let conn = h2_builder
                     .handshake::<_, bytes::Bytes>(stream)
                     .await;
