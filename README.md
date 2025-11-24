@@ -1,3 +1,5 @@
+<img src="logo/plumbrs.png" alt="plumbrs-logo" style="zoom: 60%;" />
+
 # Plumbrs — A benchmarking tool for HTTP servers and client libraries in Rust
 
 Plumbrs is a benchmarking tool for measuring and comparing HTTP server performance using a variety of asynchronous HTTP client libraries in Rust. It focuses on realistic workloads across servers and client implementations built on Tokio, helping you identify bottlenecks and optimize performance.
@@ -8,13 +10,14 @@ Plumbrs provides ready-to-use benchmarking tasks for several popular HTTP client
 
 ### Built-in clients
 
-1. Hyper (`hyper`) — Hyper-based HTTP client (one per connection).
-1. Hyper (`hyper-multichunk`) — Hyper-based HTTP client with multi-chunked body (one per connection).
-2. Hyper (legacy) (`hyper-legacy`) — Legacy Hyper HTTP client (one per connection).
-3. Hyper (legacy, one per runtime) (`hyper-rt1`) — Legacy Hyper HTTP client shared across a runtime.
-4. Hyper + h2 (`hyper-h2`) — HTTP/2 client using Hyper with the h2 library (one per connection).
-5. Reqwest (`reqwest`) — Popular Reqwest HTTP client (one per runtime).
-6. Help (`help`) — Print available client types and exit.
+1. Auto (`auto`) — Automatically select the best client (default).
+2. Hyper (`hyper`) — Hyper-based HTTP client (one per connection).
+3. Hyper (`hyper-multichunk`) — Hyper-based HTTP client with multi-chunked body (one per connection).
+4. Hyper (legacy) (`hyper-legacy`) — Legacy Hyper HTTP client (one per connection).
+5. Hyper (legacy, one per runtime) (`hyper-rt1`) — Legacy Hyper HTTP client shared across a runtime.
+6. Hyper + h2 (`hyper-h2`) — HTTP/2 client using Hyper with the h2 library (one per connection).
+7. Reqwest (`reqwest`) — Popular Reqwest HTTP client (one per runtime).
+8. Help (`help`) — Print available client types and exit.
 
 ## Key features
 
@@ -52,9 +55,14 @@ Plumbrs provides ready-to-use benchmarking tasks for several popular HTTP client
 - `-M, --method <METHOD>` (default: `GET`)
   HTTP method to use (for example, `GET`, `POST`, `PUT`, `DELETE`).
 
-- `-H, --header <KEY=VALUE>` (repeatable)
+- `-H, --header <KEY:VALUE>` (repeatable)
   Add an HTTP header to the request. Can be specified multiple times.
-  Format: `KEY=VALUE` (for example, `-H "Accept=application/json" -H "X-Token=abc"`).
+  Format: `KEY:VALUE` (for example, `-H "Accept:application/json" -H "X-Token:abc"`).
+
+- `-T, --trailer <KEY:VALUE>` (repeatable)
+  Add an HTTP trailer to the request. Can be specified multiple times.
+  Format: `KEY:VALUE` (for example, `-T "Trailer-Name:value"`).
+  Note: Not available with `reqwest` client.
 
 - `-B, --body <BODY>`
   Body content for the HTTP request.
@@ -65,9 +73,11 @@ Plumbrs provides ready-to-use benchmarking tasks for several popular HTTP client
 
 ## Client options
 
-- `-T, --client-type <TYPE>` (default: `hyper`)
+- `-C, --client <TYPE>` (default: `auto`)
   Client type to use for benchmarking. Options:
+  - `auto` — Automatically select the best client (default).
   - `hyper` — Hyper client; one per connection. Supports HTTP/1 and HTTP/2.
+  - `hyper-multichunk` — Hyper client; one per connection, with multi-chunked body. Supports HTTP/1 and HTTP/2.
   - `hyper-h2` — Hyper client using the h2 library; one per connection. HTTP/2 only.
   - `hyper-legacy` — Legacy Hyper client; one per connection. Supports HTTP/1 and HTTP/2.
   - `hyper-rt1` — Legacy Hyper client; one per runtime. Supports HTTP/1 and HTTP/2.
@@ -76,6 +86,9 @@ Plumbrs provides ready-to-use benchmarking tasks for several popular HTTP client
 
 - `--cps`
   Open a new connection for every request, measuring Connections Per Second (CPS).
+
+- `--latency`
+  Enable latency estimation using Gil Tene's coordinated omission correction algorithm.
 
 ## HTTP/1 options
 
@@ -206,7 +219,9 @@ The following CLI constraints are enforced at runtime:
 - Host option restrictions:
   - `--host` is not available with `hyper-legacy` or `hyper-rt1`.
 - CPS restriction:
-  - `--cps` can only be used with `--client-type hyper`.
+  - `--cps` can only be used with `--client hyper`.
+- Trailer restrictions:
+  - `-T, --trailer` is not available with the `reqwest` client.
 - Threading consistency:
   - When `--multi-threaded <N>` is provided, `--threads` must be an exact multiple of `<N>`.
 
@@ -226,7 +241,7 @@ plumbrs -t 4 -c 100 -M POST \
 
 HTTP/2 with advanced flow control and tuning options:
 ```bash
-plumbrs -T hyper --http2 \
+plumbrs -C hyper --http2 \
   --http2-adaptive-window true \
   --http2-initial-stream-window-size 1048576 \
   --http2-initial-connection-window-size 2097152 \
@@ -242,16 +257,26 @@ plumbrs --cps -c 10 -r 1000 http://localhost:8080
 
 List available client types:
 ```bash
-plumbrs -T help
+plumbrs -C help
 ```
 
 HTTP/1 with custom buffer size and header options:
 ```bash
-plumbrs -T hyper \
+plumbrs -C hyper \
   --http1-max-buf-size 524288 \
   --http1-title-case-headers \
   --http1-max-headers 150 \
   -c 100 -d 30 http://localhost:8080
+```
+
+Latency-corrected benchmarking:
+```bash
+plumbrs --latency -c 100 -d 30 http://localhost:8080
+```
+
+Using HTTP trailers:
+```bash
+plumbrs -C hyper -T "X-Checksum:abc123" -T "X-Signature:xyz789" http://localhost:8080
 ```
 
 ## Enabling Tokio unstable APIs
