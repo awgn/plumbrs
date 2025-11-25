@@ -6,6 +6,7 @@ use http::{Method, method::InvalidMethod};
 use crate::client::ClientType;
 
 #[derive(Parser, Debug, Clone)]
+#[command(version)]
 pub struct Options {
     #[arg(
         help = "Number of total threads",
@@ -71,7 +72,11 @@ pub struct Options {
     pub headers: Vec<(String, String)>,
     #[arg(help = "HTTP trailers", short = 'T', long = "trailer", value_parser = parse_key_val)]
     pub trailers: Vec<(String, String)>,
-    #[arg(help = "Body of the request (can be repeated multiple times as chunks)", short = 'B', long = "body")]
+    #[arg(
+        help = "Body of the request (can be repeated multiple times as chunks)",
+        short = 'B',
+        long = "body"
+    )]
     pub body: Vec<String>,
     #[arg(
         help = "Open a new connection for every request, computing Connections Per Second",
@@ -95,9 +100,15 @@ pub struct Options {
     pub http2_initial_max_send_streams: Option<usize>,
     #[arg(help = "Sets the initial maximum of concurrently reset streams.", long)]
     pub http2_max_concurrent_reset_streams: Option<usize>,
-    #[arg(help = "Sets the initial window size for HTTP/2 stream-level flow control.", long)]
+    #[arg(
+        help = "Sets the initial window size for HTTP/2 stream-level flow control.",
+        long
+    )]
     pub http2_initial_stream_window_size: Option<u32>,
-    #[arg(help = "Sets the initial window size for HTTP/2 connection-level flow control.", long)]
+    #[arg(
+        help = "Sets the initial window size for HTTP/2 connection-level flow control.",
+        long
+    )]
     pub http2_initial_connection_window_size: Option<u32>,
     #[arg(help = "Sets the maximum frame size for HTTP/2.", long)]
     pub http2_max_frame_size: Option<u32>,
@@ -109,21 +120,42 @@ pub struct Options {
     pub http2_keep_alive_while_idle: bool,
     #[arg(help = "Sets the maximum buffer size for HTTP/1.", long)]
     pub http1_max_buf_size: Option<usize>,
-    #[arg(help = "Sets the exact size of the read buffer to always use for HTTP/1.", long)]
+    #[arg(
+        help = "Sets the exact size of the read buffer to always use for HTTP/1.",
+        long
+    )]
     pub http1_read_buf_exact_size: Option<usize>,
-    #[arg(help = "Set whether HTTP/1 connections should try to use vectored writes.", long)]
+    #[arg(
+        help = "Set whether HTTP/1 connections should try to use vectored writes.",
+        long
+    )]
     pub http1_writev: Option<bool>,
-    #[arg(help = "Set whether HTTP/1 connections will write header names as title case.", long)]
+    #[arg(
+        help = "Set whether HTTP/1 connections will write header names as title case.",
+        long
+    )]
     pub http1_title_case_headers: bool,
-    #[arg(help = "Set whether to support preserving original header cases for HTTP/1.", long)]
+    #[arg(
+        help = "Set whether to support preserving original header cases for HTTP/1.",
+        long
+    )]
     pub http1_preserve_header_case: bool,
     #[arg(help = "Set the maximum number of headers for HTTP/1.", long)]
     pub http1_max_headers: Option<usize>,
-    #[arg(help = "Set whether HTTP/1 connections will accept spaces after header name in responses.", long)]
+    #[arg(
+        help = "Set whether HTTP/1 connections will accept spaces after header name in responses.",
+        long
+    )]
     pub http1_allow_spaces_after_header_name_in_responses: bool,
-    #[arg(help = "Set whether HTTP/1 connections will accept obsolete line folding for header values.", long)]
+    #[arg(
+        help = "Set whether HTTP/1 connections will accept obsolete line folding for header values.",
+        long
+    )]
     pub http1_allow_obsolete_multiline_headers_in_responses: bool,
-    #[arg(help = "Set whether HTTP/1 connections will silently ignore malformed header lines.", long)]
+    #[arg(
+        help = "Set whether HTTP/1 connections will silently ignore malformed header lines.",
+        long
+    )]
     pub http1_ignore_invalid_headers_in_responses: bool,
     #[arg(help = "Set whether HTTP/0.9 responses should be tolerated.", long)]
     pub http09_responses: bool,
@@ -132,10 +164,7 @@ pub struct Options {
         long = "host"
     )]
     pub host: Option<String>,
-    #[arg(
-        help = "HTTP uri used in the request (e.g. http://192.168.0.1:80)",
-        default_value = ""
-    )]
+    #[arg(help = "HTTP URIs used in the request (e.g. http://192.168.0.1:80)")]
     pub uri: Vec<String>,
 }
 

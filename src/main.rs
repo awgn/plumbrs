@@ -20,6 +20,11 @@ static GLOBAL: Jemalloc = Jemalloc;
 fn main() -> Result<()> {
     pretty_env_logger::init();
     let mut opts = Options::parse();
+    if opts.uri.is_empty() {
+        println!("Missing URI. Try --help");
+        std::process::exit(1);
+    } 
+
     enforce_consistency(&mut opts)?;
     engine::run_tokio_engines(opts)
 }
