@@ -28,6 +28,12 @@ pub struct Options {
     )]
     pub verbose: bool,
     #[arg(
+        help = "Display runtime metrics at the end",
+        long = "metrics",
+        default_value_t = false
+    )]
+    pub metrics: bool,
+    #[arg(
         help = "Concurrent number of connections or HTTP2 streams",
         short = 'c',
         long = "concurrency",

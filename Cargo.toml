@@ -1,6 +1,6 @@
 [package]
 name = "plumbrs"
-version = "0.5.6"
+version = "0.6.0"
 edition = "2024"
 authors = ["Nicola Bonelli <nicola@larthia.com>"]
 description = "A high-performance HTTP/1.1 and HTTP/2 benchmarking tool"
@@ -39,6 +39,9 @@ futures-util = "0.3.31"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = { version = "0.6" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tokio_unstable)'] }
 
 [profile.release]
 debug = false

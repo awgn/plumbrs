@@ -9,6 +9,7 @@ use crate::client::reqwest::*;
 use crate::client::utils::build_http_connection_legacy;
 use crate::stats::RealtimeStats;
 use crate::stats::Statistics;
+use crate::metrics::Metrics;
 use atomic_time::AtomicDuration;
 use atomic_time::AtomicInstant;
 
@@ -74,18 +75,23 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
         let stats = rt_stats.clone();
         opts.connections /= instances; // number of connection per engine
         let handle =
-            thread::spawn(move || -> Result<Statistics> { runtime_engine(id, opts, stats) });
+            thread::spawn(move || -> Result<(Statistics, Metrics)> { runtime_engine(id, opts, stats) });
 
         handles.push(handle);
     }
 
     let coll = handles.into_iter().map(|h| h.join().expect("thread error"));
-    let out = coll.collect::<Result<Vec<_>, _>>()?;
+    let out : Vec<(Statistics, Metrics)> = coll.collect::<Result<Vec<_>, _>>()?;
     let duration = start.elapsed().as_micros() as u64;
 
-    let total = out
+    let (total_stats, total_metrics) = out
         .into_iter()
-        .fold(Statistics::default(), |acc_s, s| acc_s + s);
+        .fold((Statistics::default(), Metrics::default()), |(acc_s, mut acc_m), (s, m)| {
+            acc_m.aggregate(&m);
+            (acc_s + s, acc_m)
+        });
+
+    let total = total_stats;
 
     println!("\n─────────────────────────────────────────────────────────────────────");
 
@@ -177,6 +183,11 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
 
     println!("─────────────────────────────────────────────────────────────────────");
 
+    // Display metrics if enabled
+    if opts.metrics {
+        total_metrics.display();
+    }
+
     Ok(())
 }
 
@@ -184,7 +195,7 @@ fn runtime_engine(
     id: usize,
     opts: Options,
     rt_stats: Arc<Vec<RealtimeStats>>,
-) -> Result<Statistics> {
+) -> Result<(Statistics, Metrics)> {
     let opts = Arc::new(opts);
     let start = Instant::now();
     let park_time = Arc::new(AtomicInstant::new(start));
@@ -296,7 +307,9 @@ fn runtime_engine(
         total_park_time.load(Ordering::Relaxed).as_secs_f64() / start.elapsed().as_secs_f64(),
     );
 
-    Ok(stats)
+    let metrics = Metrics::new(&runtime.metrics());
+
+    Ok((stats, metrics))
 }
 
 async fn spawn_tasks(

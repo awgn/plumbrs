@@ -2,6 +2,7 @@ pub mod client;
 pub mod engine;
 pub mod options;
 pub mod stats;
+pub mod metrics;
 
 use anyhow::{Result, anyhow};
 use clap::Parser;

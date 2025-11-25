@@ -25,7 +25,7 @@ Plumbrs provides ready-to-use benchmarking tasks for several popular HTTP client
 - Multi-runtime support — Run benchmarks using multiple Tokio runtimes (single-threaded or multi-threaded).
 - Connection configuration — Control the total number of connections or rely on client-specific pooling.
 - Runtime tuning — Customize thread counts, scheduling, and runtime parameters.
-- Optional Tokio metrics — Collect fine-grained runtime data with `tokio-metrics`.
+- Optional Tokio metrics — Collect fine-grained runtime data with `--metrics` option.
 
 ## Basic options
 
