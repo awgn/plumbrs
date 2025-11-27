@@ -1,6 +1,6 @@
 [package]
 name = "plumbrs"
-version = "0.6.1"
+version = "0.7.0"
 edition = "2024"
 authors = ["Nicola Bonelli <nicola@larthia.com>"]
 description = "A high-performance HTTP/1.1 and HTTP/2 benchmarking tool"
@@ -15,7 +15,7 @@ bytes = "1.11.0"
 clap = { version = "4.5.53", features = ["derive"] }
 futures = "0.3.31"
 h2 = "0.4.12"
-http = "1.3.1"
+http = "1.4.0"
 httparse = "1.10.1"
 hyper = { version = "1.8.1", features = ["full"] }
 pretty_env_logger = "0.5.0"

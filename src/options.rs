@@ -1,9 +1,13 @@
-use std::time::Duration;
+use std::{convert::Infallible, path::PathBuf, time::Duration};
 
+use bytes::Bytes;
 use clap::Parser;
 use http::{Method, method::InvalidMethod};
-
+use anyhow::Result;
+use tokio::io;
 use crate::client::ClientType;
+use tokio_util::either::Either;
+use futures_util::StreamExt;
 
 #[derive(Parser, Debug, Clone)]
 #[command(version)]
@@ -73,11 +77,17 @@ pub struct Options {
     #[arg(help = "HTTP trailers", short = 'T', long = "trailer", value_parser = parse_key_val)]
     pub trailers: Vec<(String, String)>,
     #[arg(
-        help = "Body of the request (can be repeated multiple times as chunks)",
+        help = "Body of the request; can be specified multiple times for multi-chunk encoding",
         short = 'B',
         long = "body"
     )]
     pub body: Vec<String>,
+    #[arg(
+        help = "File path for the body of the request",
+        short = 'b',
+        long = "body-from-file"
+    )]
+    pub body_path: Option<PathBuf>,
     #[arg(
         help = "Open a new connection for every request, computing Connections Per Second",
         long = "cps",
@@ -168,14 +178,39 @@ pub struct Options {
     pub uri: Vec<String>,
 }
 
+impl Options {
+    pub fn full_body(&self) -> Result<Bytes, io::Error> {
+        if let Some(path) = &self.body_path {
+            let data = std::fs::read_to_string(path)?;
+            Ok(data.into())
+        } else if !self.body.is_empty() {
+            let data = self.body.join("");
+            Ok(data.into())
+        } else {
+            Ok(Bytes::default())
+        }
+    }
+
+    pub async fn stream_body(&self) -> Result<impl futures_util::Stream<Item = Result<Bytes, Infallible>> + Send + use<>> {
+        if let Some(path) = &self.body_path {
+            let file = tokio::fs::File::open(path).await?;
+            let stream = tokio_util::io::ReaderStream::new(file);
+            Ok(Either::Left(stream.map(|r| Ok(r.unwrap()))))
+        } else {
+            let chunks: Vec<Bytes> = self.body.iter().map(|s| Bytes::from(s.clone())).collect();
+            let stream = futures_util::stream::iter(chunks.into_iter().map(Ok));
+            Ok(Either::Right(stream))
+        }
+    }
+}
+
 fn parse_secs(arg: &str) -> Result<Duration, std::num::ParseIntError> {
     let seconds = arg.parse()?;
     Ok(Duration::from_secs(seconds))
 }
 
-fn parse_http_method(arg: &str) -> Result<Option<Method>, InvalidMethod> {
-    let method = arg.parse()?;
-    Ok(Some(method))
+fn parse_http_method(arg: &str) -> Result<Method, InvalidMethod> {
+    arg.parse()
 }
 
 fn parse_key_val(s: &str) -> Result<(String, String), String> {

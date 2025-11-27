@@ -66,9 +66,12 @@ Plumbrs provides ready-to-use benchmarking tasks for several popular HTTP client
   Format: `KEY:VALUE` (for example, `-T "Trailer-Name:value"`).
   Note: Not available with `reqwest` client.
 
-- `-B, --body <BODY>`
-  Body content for the HTTP request. If repeated multiple times, chunked transfer encoding
-  is used.
+- `-B, --body <BODY>` (repeatable)
+  Body content for the HTTP request. Can be specified multiple times for multi-chunk
+  (chunked transfer) encoding.
+
+- `-b, --body-from-file <PATH>`
+  File path for the body of the request. The file content will be streamed as the request body.
 
 - `--host <HOST>`
   Set the host to benchmark (for example, `http://192.168.0.1:8080`).
@@ -235,8 +238,15 @@ plumbrs -c 10 -d 30 http://localhost:8080
 POST request with headers and a body using 4 threads and 100 concurrent connections:
 ```bash
 plumbrs -t 4 -c 100 -M POST \
-  -H "Content-Type=application/json" -H "Accept=application/json" \
+  -H "Content-Type:application/json" -H "Accept:application/json" \
   -B '{"key":"value"}' http://localhost:8080/api
+```
+
+POST request with body from file:
+```bash
+plumbrs -t 4 -c 100 -M POST \
+  -H "Content-Type:application/json" \
+  -b ./payload.json http://localhost:8080/api
 ```
 
 HTTP/2 with advanced flow control and tuning options:

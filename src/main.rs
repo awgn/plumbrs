@@ -23,7 +23,7 @@ fn main() -> Result<()> {
     if opts.uri.is_empty() {
         println!("Missing URI. Try --help");
         std::process::exit(1);
-    } 
+    }
 
     enforce_consistency(&mut opts)?;
     engine::run_tokio_engines(opts)
@@ -35,7 +35,7 @@ fn enforce_consistency(opts: &mut Options) -> Result<()> {
     }
 
     if opts.method.is_none() {
-        if opts.body.is_empty()  {
+        if opts.body.is_empty() && opts.body_path.is_none() {
             opts.method = Some(http::Method::GET);
         }
         else {

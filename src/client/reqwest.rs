@@ -23,7 +23,7 @@ pub async fn http_reqwest(
     let headers = build_headers(None, opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
 
-    let body = opts.body.first().cloned();
+    let body : Option<String> = Some(opts.full_body().map_or_else(|e| fatal!(2, "could not read body: {e}"), |b| String::from_utf8_lossy(&b).to_string()));
 
     let start = Instant::now();
     'connection: loop {
