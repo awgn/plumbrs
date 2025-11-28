@@ -70,10 +70,18 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
         ctrl_c_handle.abort();
     });
 
+    let connections_per_instance = opts.connections / instances;
+    let reminder = opts.connections % instances;
+
     for id in 0..instances {
         let mut opts = opts.clone();
         let stats = rt_stats.clone();
-        opts.connections /= instances; // number of connection per engine
+        opts.connections = if id < reminder {
+            connections_per_instance + 1
+        } else {
+            connections_per_instance
+        };
+
         let handle =
             thread::spawn(move || -> Result<(Statistics, Metrics)> { runtime_engine(id, opts, stats) });
 
