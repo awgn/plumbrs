@@ -181,7 +181,7 @@ pub struct Options {
 impl Options {
     pub fn full_body(&self) -> Result<Bytes, io::Error> {
         if let Some(path) = &self.body_path {
-            let data = std::fs::read_to_string(path)?;
+            let data = std::fs::read(path)?;
             Ok(data.into())
         } else if !self.body.is_empty() {
             let data = self.body.join("");

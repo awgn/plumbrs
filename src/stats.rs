@@ -38,7 +38,7 @@ impl Statistics {
             idle: 0.0,
             latency: if with_latency {
                 Some(
-                    Histogram::<u64>::new_with_bounds(1, 1000000, 3)
+                    Histogram::<u64>::new_with_bounds(1, 10000000, 3)
                         .expect("failed to create histogram"),
                 )
             } else {

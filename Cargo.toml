@@ -1,6 +1,6 @@
 [package]
 name = "plumbrs"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2024"
 authors = ["Nicola Bonelli <nicola@larthia.com>"]
 description = "A high-performance HTTP/1.1 and HTTP/2 benchmarking tool"
