@@ -259,7 +259,7 @@ fn runtime_engine(
             .global_queue_interval(opts.global_queue_interval.unwrap_or(31))
             .event_interval(opts.event_interval.unwrap_or(61))
             .max_io_events_per_tick(opts.max_io_events_per_tick.unwrap_or(1024))
-            .thread_name(format!("plumbr-{}/s", id))
+            .thread_name(format!("plumbrs-{}/s", id))
             .build()
             .unwrap(),
 
@@ -273,7 +273,7 @@ fn runtime_engine(
                     .global_queue_interval(opts.global_queue_interval.unwrap_or(61))
                     .event_interval(opts.event_interval.unwrap_or(61))
                     .max_io_events_per_tick(opts.max_io_events_per_tick.unwrap_or(1024))
-                    .thread_name(format!("plumbr-{}/m", id))
+                    .thread_name(format!("plumbrs-{}/m", id))
                     .on_thread_park({
                         let park_time = Arc::clone(&park_time);
                         move || {
@@ -300,7 +300,7 @@ fn runtime_engine(
                     .global_queue_interval(opts.global_queue_interval.unwrap_or(61))
                     .event_interval(opts.event_interval.unwrap_or(61))
                     .max_io_events_per_tick(opts.max_io_events_per_tick.unwrap_or(1024))
-                    .thread_name(format!("plumbr-{}/m", id))
+                    .thread_name(format!("plumbrs-{}/m", id))
                     .on_thread_park({
                         let park_time = Arc::clone(&park_time);
                         move || {
@@ -329,7 +329,7 @@ fn runtime_engine(
                 .global_queue_interval(opts.global_queue_interval.unwrap_or(61))
                 .event_interval(opts.event_interval.unwrap_or(61))
                 .max_io_events_per_tick(opts.max_io_events_per_tick.unwrap_or(1024))
-                .thread_name(format!("plumbr-{}/m", id))
+                .thread_name(format!("plumbrs-{}/m", id))
                 .on_thread_park({
                     let park_time = Arc::clone(&park_time);
                     move || {
