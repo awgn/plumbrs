@@ -26,6 +26,10 @@ use tokio::task::JoinSet;
 use anyhow::Result;
 use std::sync::atomic::Ordering;
 
+use tabled::builder::Builder as TableBuilder;
+use tabled::settings::{Style, Alignment, Modify, Width};
+use tabled::settings::object::Columns;
+
 pub fn run_tokio_engines(opts: Options) -> Result<()> {
     let mut handles: Vec<_> = Vec::with_capacity(opts.threads);
     let instances = opts.threads / opts.multithreaded.unwrap_or(1);
@@ -101,102 +105,141 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
 
     let total = total_stats;
 
-    println!("\n─────────────────────────────────────────────────────────────────────");
+    print_results(&total, duration, opts.threads, opts.metrics, &total_metrics);
 
+    Ok(())
+}
+
+fn pretty_lat(l: f64) -> String {
+    if l >= 1_000_000.0 {
+        format!("{:.2}s", l / 1_000_000.0)
+    } else if l >= 1_000.0 {
+        format!("{:.2}ms", l / 1_000.0)
+    } else {
+        format!("{:.2}µs", l)
+    }
+}
+
+fn print_results(total: &Statistics, duration: u64, threads: usize, show_metrics: bool, total_metrics: &Metrics) {
     let total_ok = total.total_ok();
     let total_3xx = total.total_status_3xx();
     let total_4xx = total.total_status_4xx();
     let total_5xx = total.total_status_5xx();
     let total_err = total.total_errors();
-    let idle_perc = total.total_idle() / (opts.threads as f64) * 100.0;
+    let idle_perc = total.total_idle() / (threads as f64) * 100.0;
 
-    // Total statistics
-    println!(
-        " Total:   okay:{:<10}  3xx:{:<10}  4xx:{:<10}  5xx:{:<10} ",
-        total_ok, total_3xx, total_4xx, total_5xx,
-    );
+    // Summary table
+    println!();
+    println!("Summary:");
 
-    // HTTP status codes summary
-    println!("          err:{:<10}   %idle:{:<10} ", total_err, idle_perc);
+    let mut builder = TableBuilder::default();
+    builder.push_record(["", "okay", "3xx", "4xx", "5xx", "err", "%idle"]);
+    builder.push_record([
+        "Total",
+        &total_ok.to_string(),
+        &total_3xx.to_string(),
+        &total_4xx.to_string(),
+        &total_5xx.to_string(),
+        &total_err.to_string(),
+        &format!("{:.2}", idle_perc),
+    ]);
+    let table = builder.build()
+        .with(Style::rounded())
+        .with(Modify::new(Columns::new(1..)).with(Alignment::right()))
+        .to_string();
+    println!("{}", table);
 
-    // Throughput
-    let ok_sec = total.total_ok() * 1000000 / duration;
+    // Details table
+    let ok_sec = if duration > 0 { total_ok * 1000000 / duration } else { 0 };
+    let mut builder = TableBuilder::default();
+    builder.push_record(["status", "total", "rate/sec"]);
+    let mut has_details = false;
 
-    // HTTP status codes details
-    println!("─────────────────────────────────────────────────────────────────────");
-    println!(" Details:                                                        ");
     if total_ok > 0 {
-        println!("   200:   total:{:<10} rate/sec:{:<10}", total_ok, ok_sec);
+        builder.push_record(["200", &total_ok.to_string(), &ok_sec.to_string()]);
+        has_details = true;
     }
 
-    let http_statuses: Vec<_> = total.http_status().iter().collect();
-    if !http_statuses.is_empty() {
-        for (key, total_value) in http_statuses {
-            let per_sec = total_value * 1000000 / duration;
-            println!(
-                "{key:>6}:   total:{:<10} rate/sec:{:<10}",
-                total_value, per_sec
-            );
-        }
+    for (key, total_value) in total.http_status().iter() {
+        let per_sec = if duration > 0 { total_value * 1000000 / duration } else { 0 };
+        builder.push_record([&key.to_string(), &total_value.to_string(), &per_sec.to_string()]);
+        has_details = true;
     }
 
-    // Errors
+    if has_details {
+        println!();
+        println!(" Details:");
+        let table = builder.build()
+            .with(Style::rounded())
+            .with(Modify::new(Columns::new(1..)).with(Alignment::right()))
+            .to_string();
+        println!("{}", table);
+    }
+
+    // Errors table
     let errors: Vec<_> = total.errors().iter().collect();
     if !errors.is_empty() {
-        println!("─────────────────────────────────────────────────────────────────────");
-        println!(" Errors:                                                         ");
-        for (key, total_value) in errors {
-            let per_sec = *total_value * 1000000 / duration;
-            let error_str = format!("{}", key);
-            if error_str.len() > 42 {
-                println!("   {}... {:>10} req/sec", &error_str[..42], per_sec);
+        println!();
+        println!(" Errors:");
+        let mut builder = TableBuilder::default();
+        builder.push_record(["error", "count", "rate/sec"]);
+        for (key, total_value) in &errors {
+            let per_sec = if duration > 0 { *total_value * 1000000 / duration } else { 0 };
+            let error_str = key.to_string();
+            let truncated = if error_str.len() > 55 {
+                format!("{}…", &error_str[..54])
             } else {
-                println!("   {:<42} {:>10} req/sec", error_str, per_sec);
-            }
+                error_str
+            };
+            builder.push_record([&truncated, &total_value.to_string(), &per_sec.to_string()]);
         }
+
+        let table = builder.build()
+            .with(Style::rounded())
+            .with(Modify::new(Columns::first()).with(Width::truncate(55)))
+            .with(Modify::new(Columns::new(1..)).with(Alignment::right()))
+            .to_string();
+        println!("{}", table);
     }
 
-    let pretty_lat = |l: f64| {
-        if l >= 1_000_000.0 {
-            format!("{:.2}s", l / 1_000_000.0)
-        } else if l >= 1_000.0 {
-            format!("{:.2}ms", l / 1_000.0)
-        } else {
-            format!("{:.2}µs", l)
-        }
-    };
+    // Latency table
+    if let Some(ref latency) = total.latency {
+        println!();
+        println!(" Latency:");
+        let mut builder = TableBuilder::default();
+        builder.push_record(["", "p50", "p75", "p90", "p99"]);
+        builder.push_record([
+            "percentiles",
+            &pretty_lat(latency.value_at_quantile(0.50) as f64),
+            &pretty_lat(latency.value_at_quantile(0.75) as f64),
+            &pretty_lat(latency.value_at_quantile(0.95) as f64),
+            &pretty_lat(latency.value_at_quantile(0.99) as f64),
+        ]);
+        let table = builder.build()
+            .with(Style::rounded())
+            .with(Modify::new(Columns::new(1..)).with(Alignment::right()))
+            .to_string();
+        println!("{}", table);
 
-    // Latency
-    if total.latency.is_some() {
-        println!("─────────────────────────────────────────────────────────────────────");
-        println!(" Latency:                                                   ");
-        if let Some(latency) = total.latency {
-            println!(
-                "{:>10}p50:{:<12} p75:{:<11} p90:{:<10}  p99:{:<10}",
-                "",
-                pretty_lat(latency.value_at_quantile(0.50) as f64),
-                pretty_lat(latency.value_at_quantile(0.75) as f64),
-                pretty_lat(latency.value_at_quantile(0.95) as f64),
-                pretty_lat(latency.value_at_quantile(0.99) as f64),
-            );
-            println!(
-                "{:>10}min:{:<12} mean:{:<10} max:{:<10}",
-                "",
-                pretty_lat(latency.min() as f64),
-                pretty_lat(latency.mean()),
-                pretty_lat(latency.max() as f64)
-            );
-        }
+        let mut builder = TableBuilder::default();
+        builder.push_record(["", "min", "mean", "max"]);
+        builder.push_record([
+            "stats",
+            &pretty_lat(latency.min() as f64),
+            &pretty_lat(latency.mean()),
+            &pretty_lat(latency.max() as f64),
+        ]);
+        let table = builder.build()
+            .with(Style::rounded())
+            .with(Modify::new(Columns::new(1..)).with(Alignment::right()))
+            .to_string();
+        println!("{}", table);
     }
-
-    println!("─────────────────────────────────────────────────────────────────────");
 
     // Display metrics if enabled
-    if opts.metrics {
+    if show_metrics {
         total_metrics.display();
     }
-
-    Ok(())
 }
 
 fn runtime_engine(

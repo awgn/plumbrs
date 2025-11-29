@@ -31,6 +31,7 @@ scopeguard = "1.2.0"
 crossterm = "0.28"
 hdrhistogram = "7.5.4"
 futures-util = "0.3.31"
+tabled = "0.18"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = { version = "0.6" }
