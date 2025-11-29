@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::atomic::AtomicU64};
+use std::{collections::HashMap, error::Error, sync::atomic::AtomicU64};
 
 use hdrhistogram::Histogram;
 
@@ -59,17 +59,17 @@ impl Statistics {
     }
 
     #[inline]
-    pub fn get_http_status(&self) -> &HashMap<u16, u64> {
+    pub fn http_status(&self) -> &HashMap<u16, u64> {
         &self.status
     }
 
     #[inline]
-    pub fn get_errors(&self) -> &HashMap<String, u64> {
+    pub fn errors(&self) -> &HashMap<String, u64> {
         &self.err
     }
 
     #[inline]
-    pub fn http_status(&mut self, code: hyper::StatusCode, rt: &RealtimeStats) {
+    pub fn set_http_status(&mut self, code: hyper::StatusCode, rt: &RealtimeStats) {
         if matches!(code, hyper::StatusCode::OK) {
             rt.ok.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             self.ok += 1;
@@ -87,12 +87,13 @@ impl Statistics {
     }
 
     #[inline]
-    pub fn err(&mut self, kind: String, rt: &RealtimeStats) {
+    pub fn set_error<E: Error + ?Sized>(&mut self, err: &E, rt: &RealtimeStats) {
         rt.err.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if let Some(val) = self.err.get_mut(&kind) {
+        let err_kind = err.to_string();
+        if let Some(val) = self.err.get_mut(&err_kind) {
             *val += 1;
         } else {
-            self.err.insert(kind, 1);
+            self.err.insert(err_kind, 1);
         }
     }
 

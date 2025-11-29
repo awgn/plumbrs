@@ -129,7 +129,7 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
         println!("   200:   total:{:<10} rate/sec:{:<10}", total_ok, ok_sec);
     }
 
-    let http_statuses: Vec<_> = total.get_http_status().iter().collect();
+    let http_statuses: Vec<_> = total.http_status().iter().collect();
     if !http_statuses.is_empty() {
         for (key, total_value) in http_statuses {
             let per_sec = total_value * 1000000 / duration;
@@ -141,13 +141,13 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
     }
 
     // Errors
-    let errors: Vec<_> = total.get_errors().iter().collect();
+    let errors: Vec<_> = total.errors().iter().collect();
     if !errors.is_empty() {
         println!("─────────────────────────────────────────────────────────────────────");
         println!(" Errors:                                                         ");
         for (key, total_value) in errors {
             let per_sec = *total_value * 1000000 / duration;
-            let error_str = format!("{:?}", key);
+            let error_str = format!("{}", key);
             if error_str.len() > 42 {
                 println!("   {}... {:>10} req/sec", &error_str[..42], per_sec);
             } else {

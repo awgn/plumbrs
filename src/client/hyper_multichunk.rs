@@ -48,8 +48,6 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
     let trailers = build_trailers(opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build trailers: {e}"));
 
-
-
     let start = Instant::now();
     'connection: loop {
         if should_stop(total, start, &opts) {
@@ -96,15 +94,15 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
             match sender.send_request(req).await {
                 Ok(res) => match discard_body(res).await {
                     Ok(StatusCode::OK) => statistics.ok(rt_stats),
-                    Ok(code) => statistics.http_status(code, rt_stats),
-                    Err(err) => {
-                        statistics.err(format!("{err:?}"), rt_stats);
+                    Ok(code) => statistics.set_http_status(code, rt_stats),
+                    Err(ref err) => {
+                        statistics.set_error(err.as_ref(), rt_stats);
                         total += 1;
                         continue 'connection;
                     }
                 },
                 Err(ref err) => {
-                    statistics.err(format!("{err:?}"), rt_stats);
+                    statistics.set_error(err, rt_stats);
                     total += 1;
                     continue 'connection;
                 }
@@ -135,7 +133,7 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
             } else {
                 let res = sender.ready().await;
                 if let Err(ref err) = res {
-                    statistics.err(format!("{err:?}"), rt_stats);
+                    statistics.set_error(err, rt_stats);
                 }
             }
         }

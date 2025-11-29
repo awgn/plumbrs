@@ -64,11 +64,11 @@ pub async fn http_reqwest(
                     if matches!(code, StatusCode::OK) {
                         statistics.ok(rt_stats);
                     } else {
-                        statistics.http_status(code, rt_stats);
+                        statistics.set_http_status(code, rt_stats);
                     }
                 }
                 Err(ref err) => {
-                    statistics.err(format!("{err:?}"), rt_stats);
+                    statistics.set_error(err, rt_stats);
                     total += 1;
                     continue 'connection;
                 }

@@ -206,13 +206,13 @@ impl HttpConnectionBuilder for Http1 {
         let stream = match stream_res {
             Ok(s) => s,
             Err(ref err) => {
-                stats.err(format!("{err:?}"), rt_stats);
+                stats.set_error(err, rt_stats);
                 return None;
             }
         };
         let stream = TokioIo::new(stream);
         let mut builder = conn1::Builder::new();
-        
+
         // Configure HTTP/1 options
         if let Some(v) = opts.http1_max_buf_size {
             builder.max_buf_size(v);
@@ -244,12 +244,12 @@ impl HttpConnectionBuilder for Http1 {
         if opts.http09_responses {
             builder.http09_responses(true);
         }
-        
+
         let conn_res = builder.handshake(stream).await;
         let (sender, connection) = match conn_res {
             Ok(p) => p,
             Err(ref err) => {
-                stats.err(format!("{err:?}"), rt_stats);
+                stats.set_error(err, rt_stats);
                 return None;
             }
         };
@@ -290,7 +290,7 @@ impl HttpConnectionBuilder for Http2 {
         let stream = match stream_res {
             Ok(s) => s,
             Err(ref err) => {
-                stats.err(format!("{err:?}"), rt_stats);
+                stats.set_error(err, rt_stats);
                 return None;
             }
         };
@@ -318,7 +318,7 @@ impl HttpConnectionBuilder for Http2 {
         let (sender, connection) = match conn_res {
             Ok(p) => p,
             Err(ref err) => {
-                stats.err(format!("{err:?}"), rt_stats);
+                stats.set_error(err, rt_stats);
                 return None;
             }
         };
@@ -391,4 +391,3 @@ where
     }
     builder.build_http()
 }
-
