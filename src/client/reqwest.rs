@@ -23,7 +23,10 @@ pub async fn http_reqwest(
     let headers = build_headers(None, opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
 
-    let body : Option<String> = Some(opts.full_body().map_or_else(|e| fatal!(2, "could not read body: {e}"), |b| String::from_utf8_lossy(&b).to_string()));
+    let body: Option<String> = Some(opts.full_body().map_or_else(
+        |e| fatal!(2, "could not read body: {e}"),
+        |b| String::from_utf8_lossy(&b).to_string(),
+    ));
 
     let start = Instant::now();
     'connection: loop {
@@ -49,7 +52,10 @@ pub async fn http_reqwest(
         };
 
         loop {
-            let mut req = Request::new(opts.method.clone().unwrap_or(http::Method::GET), url.clone());
+            let mut req = Request::new(
+                opts.method.clone().unwrap_or(http::Method::GET),
+                url.clone(),
+            );
             *req.headers_mut() = headers.clone();
 
             if let Some(ref body) = body {
@@ -107,7 +113,8 @@ pub fn build_http_client(opts: &Options, headers: &HeaderMap) -> Result<Client> 
         // Apply additional HTTP/2 options
         // Note: reqwest doesn't expose initial_max_send_streams, max_concurrent_reset_streams, or max_send_buffer_size
         builder = builder.http2_initial_stream_window_size(opts.http2_initial_stream_window_size);
-        builder = builder.http2_initial_connection_window_size(opts.http2_initial_connection_window_size);
+        builder =
+            builder.http2_initial_connection_window_size(opts.http2_initial_connection_window_size);
         builder = builder.http2_max_frame_size(opts.http2_max_frame_size);
         if let Some(v) = opts.http2_max_header_list_size {
             builder = builder.http2_max_header_list_size(v);

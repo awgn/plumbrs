@@ -1,8 +1,8 @@
 pub mod client;
 pub mod engine;
+pub mod metrics;
 pub mod options;
 pub mod stats;
-pub mod metrics;
 
 use anyhow::{Result, anyhow};
 use clap::Parser;
@@ -30,15 +30,14 @@ fn main() -> Result<()> {
 }
 
 fn enforce_consistency(opts: &mut Options) -> Result<()> {
-    if matches!(opts.method, Some(http::Method::TRACE)) && opts.body.len() > 1  {
+    if matches!(opts.method, Some(http::Method::TRACE)) && opts.body.len() > 1 {
         return Err(anyhow!("TRACE method cannot have a body!"));
     }
 
     if opts.method.is_none() {
         if opts.body.is_empty() && opts.body_path.is_none() {
             opts.method = Some(http::Method::GET);
-        }
-        else {
+        } else {
             opts.method = Some(http::Method::POST);
         }
     }
@@ -65,7 +64,7 @@ fn enforce_consistency(opts: &mut Options) -> Result<()> {
         | ClientType::HyperRt1
         | ClientType::HyperH2
         | ClientType::Reqwest
-        if opts.body.len() > 1=>
+            if opts.body.len() > 1 =>
         {
             return Err(anyhow!(
                 "Multi-chunked body only supported with hyper-multichunk client!"
@@ -73,8 +72,12 @@ fn enforce_consistency(opts: &mut Options) -> Result<()> {
         }
         ClientType::Help => {
             println!("Available client types:");
-            println!("  hyper             - Hyper client, one per connection. Both HTTP/1 and HTTP/2");
-            println!("  hyper-multichunk  - Hyper client, one per connection, with multi-chunked body. Both HTTP/1 and HTTP/2");
+            println!(
+                "  hyper             - Hyper client, one per connection. Both HTTP/1 and HTTP/2"
+            );
+            println!(
+                "  hyper-multichunk  - Hyper client, one per connection, with multi-chunked body. Both HTTP/1 and HTTP/2"
+            );
             println!(
                 "  hyper-h2          - Hyper client, one per connection. Use h2 package, HTTP/2 only"
             );
@@ -84,7 +87,9 @@ fn enforce_consistency(opts: &mut Options) -> Result<()> {
             println!(
                 "  hyper-rt1         - Hyper client (legacy), one per runtime. Both HTTP/1 and HTTP/2"
             );
-            println!("  reqwest           - Reqwest client, one per runtime. Both HTTP/1 and HTTP/2");
+            println!(
+                "  reqwest           - Reqwest client, one per runtime. Both HTTP/1 and HTTP/2"
+            );
             std::process::exit(0);
         }
         _ => (),

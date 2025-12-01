@@ -1,13 +1,13 @@
 use std::{convert::Infallible, path::PathBuf, time::Duration};
 
+use crate::client::ClientType;
+use anyhow::Result;
 use bytes::Bytes;
 use clap::Parser;
-use http::{Method, method::InvalidMethod};
-use anyhow::Result;
-use tokio::io;
-use crate::client::ClientType;
-use tokio_util::either::Either;
 use futures_util::StreamExt;
+use http::{Method, method::InvalidMethod};
+use tokio::io;
+use tokio_util::either::Either;
 
 #[derive(Parser, Debug, Clone)]
 #[command(version)]
@@ -191,7 +191,9 @@ impl Options {
         }
     }
 
-    pub async fn stream_body(&self) -> Result<impl futures_util::Stream<Item = Result<Bytes, Infallible>> + Send + use<>> {
+    pub async fn stream_body(
+        &self,
+    ) -> Result<impl futures_util::Stream<Item = Result<Bytes, Infallible>> + Send + use<>> {
         if let Some(path) = &self.body_path {
             let file = tokio::fs::File::open(path).await?;
             let stream = tokio_util::io::ReaderStream::new(file);

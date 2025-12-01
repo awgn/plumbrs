@@ -33,7 +33,9 @@ pub async fn http_hyper_h2(
         .parse::<hyper::Uri>()
         .unwrap_or_else(|e| fatal!(1, "invalid uri: {e}"));
 
-    let body : Bytes = opts.full_body().unwrap_or_else(|e| fatal!(2, "could not read body: {e}"));
+    let body: Bytes = opts
+        .full_body()
+        .unwrap_or_else(|e| fatal!(2, "could not read body: {e}"));
 
     // http/2 use :authority: instead of Host header...
     let headers = build_headers(None, opts.as_ref())
@@ -52,7 +54,10 @@ pub async fn http_hyper_h2(
             banner.insert(uri_str.to_owned());
             println!(
                 "hyper-h2 [{tid:>2}] -> connecting to {}:{}, method = {} uri = {} HTTP2...",
-                host, port, opts.method.as_ref().unwrap_or(&http::Method::GET), uri
+                host,
+                port,
+                opts.method.as_ref().unwrap_or(&http::Method::GET),
+                uri
             );
         }
 
@@ -94,9 +99,7 @@ pub async fn http_hyper_h2(
             h2_builder.max_send_buffer_size(v);
         }
 
-        let conn = h2_builder
-            .handshake::<_, bytes::Bytes>(stream)
-            .await;
+        let conn = h2_builder.handshake::<_, bytes::Bytes>(stream).await;
         let (mut h2_client, mut connection) = match conn {
             Ok(h2_conn) => h2_conn,
             Err(ref err) => {
@@ -227,9 +230,7 @@ pub async fn http_hyper_h2(
                     h2_builder.max_send_buffer_size(v);
                 }
 
-                let conn = h2_builder
-                    .handshake::<_, bytes::Bytes>(stream)
-                    .await;
+                let conn = h2_builder.handshake::<_, bytes::Bytes>(stream).await;
                 (h2_client, connection) = match conn {
                     Ok(h2_conn) => h2_conn,
                     Err(ref err) => {

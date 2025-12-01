@@ -47,7 +47,9 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
     let trailers = build_trailers(opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build trailers: {e}"));
 
-    let body : Full<Bytes> = opts.full_body().map_or_else(|e| fatal!(2, "could not read body: {e}"), Full::new);
+    let body: Full<Bytes> = opts
+        .full_body()
+        .map_or_else(|e| fatal!(2, "could not read body: {e}"), Full::new);
 
     let start = Instant::now();
     'connection: loop {
@@ -59,11 +61,15 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
             banner.insert(uri_str.to_owned());
             println!(
                 "hyper [{tid:>2}] -> connecting to {}:{}, method = {} uri = {} {}...",
-                host, port, opts.method.as_ref().unwrap_or(&http::Method::GET), uri, B::SCHEME
+                host,
+                port,
+                opts.method.as_ref().unwrap_or(&http::Method::GET),
+                uri,
+                B::SCHEME
             );
         }
 
-        let (mut sender, conn_task) =
+        let (mut sender, mut conn_task) =
             match B::build_connection(endpoint, &mut statistics, rt_stats, &opts).await {
                 Some(s) => s,
                 None => {

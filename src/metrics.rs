@@ -88,9 +88,11 @@ impl Metrics {
         #[cfg(target_has_atomic = "64")]
         {
             for worker_id in 0..num_workers {
-                metrics.worker_total_busy_duration += tokio_metrics.worker_total_busy_duration(worker_id);
+                metrics.worker_total_busy_duration +=
+                    tokio_metrics.worker_total_busy_duration(worker_id);
                 metrics.worker_park_count += tokio_metrics.worker_park_count(worker_id);
-                metrics.worker_park_unpark_count += tokio_metrics.worker_park_unpark_count(worker_id);
+                metrics.worker_park_unpark_count +=
+                    tokio_metrics.worker_park_unpark_count(worker_id);
             }
         }
 
@@ -102,7 +104,8 @@ impl Metrics {
                 metrics.worker_steal_count += tokio_metrics.worker_steal_count(worker_id);
                 metrics.worker_steal_operations += tokio_metrics.worker_steal_operations(worker_id);
                 metrics.worker_poll_count += tokio_metrics.worker_poll_count(worker_id);
-                metrics.worker_local_schedule_count += tokio_metrics.worker_local_schedule_count(worker_id);
+                metrics.worker_local_schedule_count +=
+                    tokio_metrics.worker_local_schedule_count(worker_id);
                 metrics.worker_overflow_count += tokio_metrics.worker_overflow_count(worker_id);
             }
 
@@ -110,7 +113,8 @@ impl Metrics {
             metrics.spawned_tasks_count = tokio_metrics.spawned_tasks_count();
             metrics.budget_forced_yield_count = tokio_metrics.budget_forced_yield_count();
             metrics.io_driver_fd_registered_count = tokio_metrics.io_driver_fd_registered_count();
-            metrics.io_driver_fd_deregistered_count = tokio_metrics.io_driver_fd_deregistered_count();
+            metrics.io_driver_fd_deregistered_count =
+                tokio_metrics.io_driver_fd_deregistered_count();
             metrics.io_driver_ready_count = tokio_metrics.io_driver_ready_count();
         }
 
@@ -118,7 +122,8 @@ impl Metrics {
         #[cfg(tokio_unstable)]
         {
             for worker_id in 0..num_workers {
-                metrics.worker_local_queue_depth += tokio_metrics.worker_local_queue_depth(worker_id);
+                metrics.worker_local_queue_depth +=
+                    tokio_metrics.worker_local_queue_depth(worker_id);
                 metrics.worker_mean_poll_time += tokio_metrics.worker_mean_poll_time(worker_id);
             }
 
@@ -275,9 +280,15 @@ impl Metrics {
         #[cfg(target_has_atomic = "64")]
         {
             println!(" Worker Metrics:");
-            println!("   Total Busy Duration:  {:>10.3}s", self.worker_total_busy_duration.as_secs_f64());
+            println!(
+                "   Total Busy Duration:  {:>10.3}s",
+                self.worker_total_busy_duration.as_secs_f64()
+            );
             println!("   Park Count:           {:>10}", self.worker_park_count);
-            println!("   Park/Unpark Count:    {:>10}", self.worker_park_unpark_count);
+            println!(
+                "   Park/Unpark Count:    {:>10}",
+                self.worker_park_unpark_count
+            );
             println!("─────────────────────────────────────────────────────────────────────");
         }
 
@@ -285,39 +296,69 @@ impl Metrics {
         {
             println!(" Task Metrics:");
             println!("   Spawned Tasks:        {:>10}", self.spawned_tasks_count);
-            println!("   Budget Forced Yields: {:>10}", self.budget_forced_yield_count);
+            println!(
+                "   Budget Forced Yields: {:>10}",
+                self.budget_forced_yield_count
+            );
             println!("─────────────────────────────────────────────────────────────────────");
 
             println!(" Scheduling Metrics:");
             println!("   No-op Count:          {:>10}", self.worker_noop_count);
             println!("   Poll Count:           {:>10}", self.worker_poll_count);
-            println!("   Local Schedule Count: {:>10}", self.worker_local_schedule_count);
-            println!("   Overflow Count:       {:>10}", self.worker_overflow_count);
+            println!(
+                "   Local Schedule Count: {:>10}",
+                self.worker_local_schedule_count
+            );
+            println!(
+                "   Overflow Count:       {:>10}",
+                self.worker_overflow_count
+            );
             println!("─────────────────────────────────────────────────────────────────────");
 
             println!(" Work Stealing Metrics:");
             println!("   Steal Count:          {:>10}", self.worker_steal_count);
-            println!("   Steal Operations:     {:>10}", self.worker_steal_operations);
+            println!(
+                "   Steal Operations:     {:>10}",
+                self.worker_steal_operations
+            );
             if self.worker_steal_operations > 0 {
-                let avg_steals = self.worker_steal_count as f64 / self.worker_steal_operations as f64;
+                let avg_steals =
+                    self.worker_steal_count as f64 / self.worker_steal_operations as f64;
                 println!("   Avg Tasks/Steal:      {:>10.2}", avg_steals);
             }
             println!("─────────────────────────────────────────────────────────────────────");
 
             println!(" I/O Driver Metrics:");
-            println!("   FDs Registered:       {:>10}", self.io_driver_fd_registered_count);
-            println!("   FDs Deregistered:     {:>10}", self.io_driver_fd_deregistered_count);
-            let active_fds = self.io_driver_fd_registered_count.saturating_sub(self.io_driver_fd_deregistered_count);
+            println!(
+                "   FDs Registered:       {:>10}",
+                self.io_driver_fd_registered_count
+            );
+            println!(
+                "   FDs Deregistered:     {:>10}",
+                self.io_driver_fd_deregistered_count
+            );
+            let active_fds = self
+                .io_driver_fd_registered_count
+                .saturating_sub(self.io_driver_fd_deregistered_count);
             println!("   Active FDs:           {:>10}", active_fds);
-            println!("   Ready Events:         {:>10}", self.io_driver_ready_count);
+            println!(
+                "   Ready Events:         {:>10}",
+                self.io_driver_ready_count
+            );
             println!("─────────────────────────────────────────────────────────────────────");
         }
 
         #[cfg(tokio_unstable)]
         {
             println!(" Worker Queue Metrics:");
-            println!("   Local Queue Depth:    {:>10}", self.worker_local_queue_depth);
-            println!("   Mean Poll Time:       {:>10.3}µs", self.worker_mean_poll_time.as_micros());
+            println!(
+                "   Local Queue Depth:    {:>10}",
+                self.worker_local_queue_depth
+            );
+            println!(
+                "   Mean Poll Time:       {:>10.3}µs",
+                self.worker_mean_poll_time.as_micros()
+            );
             println!("─────────────────────────────────────────────────────────────────────");
         }
     }

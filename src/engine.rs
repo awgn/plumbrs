@@ -1,15 +1,15 @@
 use crate::Options;
 use crate::client::ClientType;
 use crate::client::hyper::*;
-use crate::client::hyper_multichunk::http_hyper_multichunk;
-use crate::client::hyper_rt1::{RequestBody, http_hyper_rt1};
 use crate::client::hyper_h2::*;
 use crate::client::hyper_legacy::*;
+use crate::client::hyper_multichunk::http_hyper_multichunk;
+use crate::client::hyper_rt1::{RequestBody, http_hyper_rt1};
 use crate::client::reqwest::*;
 use crate::client::utils::build_http_connection_legacy;
+use crate::metrics::Metrics;
 use crate::stats::RealtimeStats;
 use crate::stats::Statistics;
-use crate::metrics::Metrics;
 use atomic_time::AtomicDuration;
 use atomic_time::AtomicInstant;
 
@@ -27,8 +27,8 @@ use anyhow::Result;
 use std::sync::atomic::Ordering;
 
 use tabled::builder::Builder as TableBuilder;
-use tabled::settings::{Style, Alignment, Modify, Width};
 use tabled::settings::object::Columns;
+use tabled::settings::{Alignment, Modify, Style, Width};
 
 pub fn run_tokio_engines(opts: Options) -> Result<()> {
     let mut handles: Vec<_> = Vec::with_capacity(opts.threads);
@@ -86,22 +86,24 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
             connections_per_instance
         };
 
-        let handle =
-            thread::spawn(move || -> Result<(Statistics, Metrics)> { runtime_engine(id, opts, stats) });
+        let handle = thread::spawn(move || -> Result<(Statistics, Metrics)> {
+            runtime_engine(id, opts, stats)
+        });
 
         handles.push(handle);
     }
 
     let coll = handles.into_iter().map(|h| h.join().expect("thread error"));
-    let out : Vec<(Statistics, Metrics)> = coll.collect::<Result<Vec<_>, _>>()?;
+    let out: Vec<(Statistics, Metrics)> = coll.collect::<Result<Vec<_>, _>>()?;
     let duration = start.elapsed().as_micros() as u64;
 
-    let (total_stats, total_metrics) = out
-        .into_iter()
-        .fold((Statistics::default(), Metrics::default()), |(acc_s, mut acc_m), (s, m)| {
+    let (total_stats, total_metrics) = out.into_iter().fold(
+        (Statistics::default(), Metrics::default()),
+        |(acc_s, mut acc_m), (s, m)| {
             acc_m.aggregate(&m);
             (acc_s + s, acc_m)
-        });
+        },
+    );
 
     let total = total_stats;
 
@@ -120,7 +122,13 @@ fn pretty_lat(l: f64) -> String {
     }
 }
 
-fn print_results(total: &Statistics, duration: u64, threads: usize, show_metrics: bool, total_metrics: &Metrics) {
+fn print_results(
+    total: &Statistics,
+    duration: u64,
+    threads: usize,
+    show_metrics: bool,
+    total_metrics: &Metrics,
+) {
     let total_ok = total.total_ok();
     let total_3xx = total.total_status_3xx();
     let total_4xx = total.total_status_4xx();
@@ -143,14 +151,19 @@ fn print_results(total: &Statistics, duration: u64, threads: usize, show_metrics
         &total_err.to_string(),
         &format!("{:.2}", idle_perc),
     ]);
-    let table = builder.build()
+    let table = builder
+        .build()
         .with(Style::rounded())
         .with(Modify::new(Columns::new(1..)).with(Alignment::right()))
         .to_string();
     println!("{}", table);
 
     // Details table
-    let ok_sec = if duration > 0 { total_ok * 1000000 / duration } else { 0 };
+    let ok_sec = if duration > 0 {
+        total_ok * 1000000 / duration
+    } else {
+        0
+    };
     let mut builder = TableBuilder::default();
     builder.push_record(["status", "total", "rate/sec"]);
     let mut has_details = false;
@@ -161,15 +174,24 @@ fn print_results(total: &Statistics, duration: u64, threads: usize, show_metrics
     }
 
     for (key, total_value) in total.http_status().iter() {
-        let per_sec = if duration > 0 { total_value * 1000000 / duration } else { 0 };
-        builder.push_record([&key.to_string(), &total_value.to_string(), &per_sec.to_string()]);
+        let per_sec = if duration > 0 {
+            total_value * 1000000 / duration
+        } else {
+            0
+        };
+        builder.push_record([
+            &key.to_string(),
+            &total_value.to_string(),
+            &per_sec.to_string(),
+        ]);
         has_details = true;
     }
 
     if has_details {
         println!();
         println!(" Details:");
-        let table = builder.build()
+        let table = builder
+            .build()
             .with(Style::rounded())
             .with(Modify::new(Columns::new(1..)).with(Alignment::right()))
             .to_string();
@@ -184,7 +206,11 @@ fn print_results(total: &Statistics, duration: u64, threads: usize, show_metrics
         let mut builder = TableBuilder::default();
         builder.push_record(["error", "count", "rate/sec"]);
         for (key, total_value) in &errors {
-            let per_sec = if duration > 0 { *total_value * 1000000 / duration } else { 0 };
+            let per_sec = if duration > 0 {
+                *total_value * 1000000 / duration
+            } else {
+                0
+            };
             let error_str = key.to_string();
             let truncated = if error_str.len() > 55 {
                 format!("{}…", &error_str[..54])
@@ -194,7 +220,8 @@ fn print_results(total: &Statistics, duration: u64, threads: usize, show_metrics
             builder.push_record([&truncated, &total_value.to_string(), &per_sec.to_string()]);
         }
 
-        let table = builder.build()
+        let table = builder
+            .build()
             .with(Style::rounded())
             .with(Modify::new(Columns::first()).with(Width::truncate(55)))
             .with(Modify::new(Columns::new(1..)).with(Alignment::right()))
@@ -215,7 +242,8 @@ fn print_results(total: &Statistics, duration: u64, threads: usize, show_metrics
             &pretty_lat(latency.value_at_quantile(0.95) as f64),
             &pretty_lat(latency.value_at_quantile(0.99) as f64),
         ]);
-        let table = builder.build()
+        let table = builder
+            .build()
             .with(Style::rounded())
             .with(Modify::new(Columns::new(1..)).with(Alignment::right()))
             .to_string();
@@ -229,7 +257,8 @@ fn print_results(total: &Statistics, duration: u64, threads: usize, show_metrics
             &pretty_lat(latency.mean()),
             &pretty_lat(latency.max() as f64),
         ]);
-        let table = builder.build()
+        let table = builder
+            .build()
             .with(Style::rounded())
             .with(Modify::new(Columns::new(1..)).with(Alignment::right()))
             .to_string();
@@ -384,7 +413,9 @@ async fn spawn_tasks(
         match opts.client_type {
             ClientType::Auto => {
                 if opts.body.len() > 1 {
-                    tasks.spawn(async move { http_hyper_multichunk(id, con, opts, &stats[id]).await });
+                    tasks.spawn(
+                        async move { http_hyper_multichunk(id, con, opts, &stats[id]).await },
+                    );
                 } else {
                     tasks.spawn(async move { http_hyper(id, con, opts, &stats[id]).await });
                 }

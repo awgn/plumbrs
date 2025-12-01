@@ -10,8 +10,8 @@ use hyper::body::Frame;
 
 use crate::client::utils::*;
 use crate::fatal;
-use http_body_util::{BodyExt, Either, StreamBody};
 use futures_util::StreamExt;
+use http_body_util::{BodyExt, Either, StreamBody};
 
 pub async fn http_hyper_multichunk(
     tid: usize,
@@ -58,7 +58,11 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
             banner.insert(uri_str.to_owned());
             println!(
                 "hyper-multichunk [{tid:>2}] -> connecting to {}:{}, method = {} uri = {} {}...",
-                host, port, opts.method.as_ref().unwrap_or(&http::Method::GET), uri, B::SCHEME
+                host,
+                port,
+                opts.method.as_ref().unwrap_or(&http::Method::GET),
+                uri,
+                B::SCHEME
             );
         }
 
@@ -72,15 +76,19 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
             };
 
         loop {
-            let stream = opts.stream_body().await.unwrap_or_else(|e| fatal!(2, "could not build stream body: {e}"));
-            let stream = stream.map(|chunk| Ok::<_, std::convert::Infallible>(Frame::data(chunk.unwrap())));
+            let stream = opts
+                .stream_body()
+                .await
+                .unwrap_or_else(|e| fatal!(2, "could not build stream body: {e}"));
+            let stream =
+                stream.map(|chunk| Ok::<_, std::convert::Infallible>(Frame::data(chunk.unwrap())));
             let body = match &trailers {
-                None => {
-                    Either::Left(StreamBody::new(stream))
-                },
+                None => Either::Left(StreamBody::new(stream)),
                 Some(tr) => {
                     let trailers = Some(Result::Ok(tr.clone()));
-                    Either::Right(StreamBody::new(stream).with_trailers(std::future::ready(trailers)))
+                    Either::Right(
+                        StreamBody::new(stream).with_trailers(std::future::ready(trailers)),
+                    )
                 }
             };
 

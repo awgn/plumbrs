@@ -48,7 +48,9 @@ pub async fn http_hyper_rt1(
     let trailers = build_trailers(opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build trailers: {e}"));
 
-    let body_bytes : Bytes = opts.full_body().unwrap_or_else(|e| fatal!(2, "could not read body: {e}"));
+    let body_bytes: Bytes = opts
+        .full_body()
+        .unwrap_or_else(|e| fatal!(2, "could not read body: {e}"));
 
     let start = Instant::now();
     'connection: loop {

@@ -1,8 +1,8 @@
 pub mod hyper;
-pub mod hyper_rt1;
 pub mod hyper_h2;
 pub mod hyper_legacy;
 pub mod hyper_multichunk;
+pub mod hyper_rt1;
 pub mod reqwest;
 pub mod utils;
 use clap::ValueEnum;
@@ -25,7 +25,7 @@ impl std::fmt::Display for ClientType {
             ClientType::Auto => write!(f, "auto"),
             ClientType::Hyper => write!(f, "hyper"),
             ClientType::HyperLegacy => write!(f, "hyper-legacy"),
-            ClientType::HyperMultichunk=> write!(f, "hyper-multichunk"),
+            ClientType::HyperMultichunk => write!(f, "hyper-multichunk"),
             ClientType::HyperRt1 => write!(f, "hyper-rt1"),
             ClientType::HyperH2 => write!(f, "hyper-h2"),
             ClientType::Reqwest => write!(f, "reqwest"),
