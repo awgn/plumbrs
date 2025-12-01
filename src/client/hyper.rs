@@ -63,7 +63,7 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
             );
         }
 
-        let (mut sender, mut conn_task) =
+        let (mut sender, conn_task) =
             match B::build_connection(endpoint, &mut statistics, rt_stats, &opts).await {
                 Some(s) => s,
                 None => {
@@ -119,18 +119,18 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
 
             if opts.cps {
                 conn_task.abort();
-                (sender, conn_task) =
-                    match B::build_connection(endpoint, &mut statistics, rt_stats, &opts).await {
-                        Some(s) => s,
-                        None => {
-                            total += 1;
+                continue 'connection;
+            } else {
+                tokio::select! {
+                    res = sender.ready() => {
+                        if let Err(ref err) = res {
+                            statistics.set_error(err, rt_stats);
                             continue 'connection;
                         }
-                    };
-            } else {
-                let res = sender.ready().await;
-                if let Err(ref err) = res {
-                    statistics.set_error(err, rt_stats);
+                    }
+                    _ = &mut conn_task => {
+                        continue 'connection;
+                    }
                 }
             }
         }
