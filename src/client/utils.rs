@@ -1,8 +1,9 @@
 use crate::Options;
 use crate::stats::{RealtimeStats, Statistics};
+use bytes::Bytes;
 use http::header::HeaderValue;
 use http::{HeaderMap, Request, Response, StatusCode, header};
-use http_body_util::BodyExt;
+use http_body_util::{BodyExt, Full};
 use hyper::body::Body;
 use hyper::body::Incoming;
 use hyper::client::conn::http1 as conn1;
@@ -390,4 +391,95 @@ where
         }
     }
     builder.build_http()
+}
+
+pub async fn sse_handshake<B: HttpConnectionBuilder>(
+    endpoint: &'static str,
+    uri: &hyper::Uri,
+    opts: &Options,
+    rt_stats: &RealtimeStats,
+) -> (hyper::Uri, tokio::task::JoinHandle<()>) {
+    let mut stats = Statistics::new(opts.latency);
+    let (mut sender, conn_task) =
+        match B::build_connection::<Full<Bytes>>(endpoint, &mut stats, rt_stats, opts).await {
+            Some(s) => s,
+            None => fatal!(2, "handshake connection failed"),
+        };
+
+    let mut headers = build_headers(uri.host(), opts)
+        .unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
+
+    headers.append(
+        "Content-Type",
+        HeaderValue::from_static("text/event-stream"),
+    );
+    headers.append("Cache-Control", HeaderValue::from_static("no-cache"));
+    headers.append("Connection", HeaderValue::from_static("keep-alive"));
+
+    let mut req = Request::new(Full::new(Bytes::new()));
+    *req.method_mut() = http::Method::GET;
+    *req.uri_mut() = uri.clone();
+    *req.headers_mut() = headers;
+
+    let res = match sender.send_request(req).await {
+        Ok(r) => r,
+        Err(e) => fatal!(2, "handshake request failed: {e}"),
+    };
+
+    let mut body = res.into_body();
+    let mut buffer = String::new();
+    let mut new_path = String::new();
+
+    'read: loop {
+        match body.frame().await {
+            Some(Ok(frame)) => {
+                if let Some(data) = frame.data_ref() {
+                    let chunk = String::from_utf8_lossy(data);
+                    buffer.push_str(&chunk);
+
+                    while let Some(idx) = buffer.find('\n') {
+                        let line: String = buffer.drain(..=idx).collect();
+                        let line = line.trim();
+                        if let Some(rest) = line.strip_prefix("data:") {
+                            new_path = rest.trim().to_string();
+                            break 'read;
+                        }
+                    }
+                }
+            }
+            Some(Err(e)) => fatal!(2, "handshake body error: {e}"),
+            None => break,
+        }
+    }
+
+    if new_path.is_empty() {
+        fatal!(2, "could not find endpoint in SSE handshake");
+    }
+
+    let new_uri = if new_path.starts_with("http://") || new_path.starts_with("https://") {
+        new_path
+            .parse::<hyper::Uri>()
+            .unwrap_or_else(|e| fatal!(2, "invalid uri from SSE: {e}"))
+    } else {
+        let mut parts = uri.clone().into_parts();
+        parts.path_and_query = Some(
+            new_path
+                .parse()
+                .unwrap_or_else(|e| fatal!(2, "invalid path from SSE: {e}")),
+        );
+        hyper::Uri::from_parts(parts).unwrap_or_else(|e| fatal!(2, "invalid new uri: {e}"))
+    };
+
+    let task = tokio::spawn(async move {
+        while let Some(frame) = body.frame().await {
+            if let Err(e) = frame {
+                eprintln!("SSE: error reading frame: {e}");
+            }
+        }
+
+        eprintln!("SSE: connection closed.");
+        let _ = conn_task.await;
+    });
+
+    (new_uri, task)
 }

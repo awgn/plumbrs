@@ -42,6 +42,13 @@ fn enforce_consistency(opts: &mut Options) -> Result<()> {
         }
     }
 
+    if !matches!(opts.client_type, ClientType::Auto) &&
+        !matches!(opts.client_type, ClientType::Hyper) &&
+         opts.sse
+    {
+        return Err(anyhow!("SSE not supported with this client!"));
+    }
+
     match opts.client_type {
         ClientType::Auto
         | ClientType::HyperLegacy

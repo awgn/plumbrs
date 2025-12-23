@@ -170,6 +170,12 @@ pub struct Options {
     #[arg(help = "Set whether HTTP/0.9 responses should be tolerated.", long)]
     pub http09_responses: bool,
     #[arg(
+        help = "Enable Server-Sent Events (SSE) handshake.",
+        long = "sse",
+        default_value_t = false
+    )]
+    pub sse: bool,
+    #[arg(
         help = "Set the host to benchmark (e.g. http://192.168.0.1:8080)",
         long = "host"
     )]
