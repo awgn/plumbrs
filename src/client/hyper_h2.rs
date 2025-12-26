@@ -115,6 +115,8 @@ pub async fn http_hyper_h2(
             }
         });
 
+        statistics.inc_conn();
+
         loop {
             let mut req = Request::new(());
             *req.method_mut() = opts.method.clone().unwrap_or(http::Method::GET);
@@ -162,7 +164,7 @@ pub async fn http_hyper_h2(
 
             match res.status() {
                 StatusCode::OK => {
-                    statistics.ok(rt_stats);
+                    statistics.inc_ok(rt_stats);
                     let (_head, mut body) = res.into_parts();
                     while let Some(chunk_res) = body.data().await {
                         let chunk_len = match chunk_res {

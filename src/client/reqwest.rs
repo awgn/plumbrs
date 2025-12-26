@@ -51,6 +51,8 @@ pub async fn http_reqwest(
             }
         };
 
+        statistics.inc_conn();
+
         loop {
             let mut req = Request::new(
                 opts.method.clone().unwrap_or(http::Method::GET),
@@ -68,7 +70,7 @@ pub async fn http_reqwest(
                 Ok(res) => {
                     let code = res.status();
                     if matches!(code, StatusCode::OK) {
-                        statistics.ok(rt_stats);
+                        statistics.inc_ok(rt_stats);
                     } else {
                         statistics.set_http_status(code, rt_stats);
                     }

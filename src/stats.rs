@@ -23,6 +23,7 @@ impl Default for RealtimeStats {
 #[derive(Debug, PartialEq, Default, Clone)]
 pub struct Statistics {
     ok: u64,
+    conn: u64,
     status: HashMap<u16, u64>,
     err: HashMap<String, u64>,
     idle: f64,
@@ -33,6 +34,7 @@ impl Statistics {
     pub fn new(with_latency: bool) -> Self {
         Statistics {
             ok: 0,
+            conn: 0,
             status: HashMap::new(),
             err: HashMap::new(),
             idle: 0.0,
@@ -48,9 +50,14 @@ impl Statistics {
     }
 
     #[inline]
-    pub fn ok(&mut self, rt: &RealtimeStats) {
+    pub fn inc_ok(&mut self, rt: &RealtimeStats) {
         rt.ok.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.ok += 1;
+    }
+
+    #[inline]
+    pub fn inc_conn(&mut self) {
+        self.conn += 1;
     }
 
     #[inline]
@@ -64,7 +71,7 @@ impl Statistics {
     }
 
     #[inline]
-    pub fn errors(&self) -> &HashMap<String, u64> {
+    pub fn errors_map(&self) -> &HashMap<String, u64> {
         &self.err
     }
 
@@ -98,22 +105,27 @@ impl Statistics {
     }
 
     #[inline]
-    pub fn total_ok(&self) -> u64 {
+    pub fn ok(&self) -> u64 {
         self.ok
     }
 
     #[inline]
-    pub fn total_idle(&self) -> f64 {
+    pub fn conn(&self) -> u64 {
+        self.conn
+    }
+
+    #[inline]
+    pub fn idle(&self) -> f64 {
         self.idle
     }
 
     #[inline]
-    pub fn total_errors(&self) -> u64 {
+    pub fn errors(&self) -> u64 {
         self.err.values().sum()
     }
 
     #[inline]
-    pub fn total_status_3xx(&self) -> u64 {
+    pub fn status_3xx(&self) -> u64 {
         self.status
             .iter()
             .filter(|(code, _)| (300..400).contains(*code))
@@ -122,7 +134,7 @@ impl Statistics {
     }
 
     #[inline]
-    pub fn total_status_4xx(&self) -> u64 {
+    pub fn status_4xx(&self) -> u64 {
         self.status
             .iter()
             .filter(|(code, _)| (400..500).contains(*code))
@@ -131,7 +143,7 @@ impl Statistics {
     }
 
     #[inline]
-    pub fn total_status_5xx(&self) -> u64 {
+    pub fn status_5xx(&self) -> u64 {
         self.status
             .iter()
             .filter(|(code, _)| (500..600).contains(*code))
@@ -164,6 +176,7 @@ impl std::ops::Add for Statistics {
 
         Statistics {
             ok: self.ok + other.ok,
+            conn: self.conn + other.conn,
             err: e,
             status: hs,
             idle: self.idle + other.idle,

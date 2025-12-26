@@ -129,22 +129,24 @@ fn print_results(
     show_metrics: bool,
     total_metrics: &Metrics,
 ) {
-    let total_ok = total.total_ok();
-    let total_3xx = total.total_status_3xx();
-    let total_4xx = total.total_status_4xx();
-    let total_5xx = total.total_status_5xx();
-    let total_err = total.total_errors();
-    let idle_perc = total.total_idle() / (threads as f64) * 100.0;
+    let total_ok = total.ok();
+    let total_conn = total.conn();
+    let total_3xx = total.status_3xx();
+    let total_4xx = total.status_4xx();
+    let total_5xx = total.status_5xx();
+    let total_err = total.errors();
+    let idle_perc = total.idle() / (threads as f64) * 100.0;
 
     // Summary table
     println!();
     println!("Summary:");
 
     let mut builder = TableBuilder::default();
-    builder.push_record(["", "okay", "3xx", "4xx", "5xx", "err", "%idle"]);
+    builder.push_record(["", "okay", "conn", "3xx", "4xx", "5xx", "err", "%idle"]);
     builder.push_record([
         "Total",
         &total_ok.to_string(),
+        &total_conn.to_string(),
         &total_3xx.to_string(),
         &total_4xx.to_string(),
         &total_5xx.to_string(),
@@ -199,7 +201,7 @@ fn print_results(
     }
 
     // Errors table
-    let errors: Vec<_> = total.errors().iter().collect();
+    let errors: Vec<_> = total.errors_map().iter().collect();
     if !errors.is_empty() {
         println!();
         println!(" Errors:");

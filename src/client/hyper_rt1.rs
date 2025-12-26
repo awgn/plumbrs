@@ -68,6 +68,8 @@ pub async fn http_hyper_rt1(
             );
         }
 
+        statistics.inc_conn();
+
         loop {
             let body: RequestBody = if let Some(tr) = trailers.clone() {
                 Either::Right(
@@ -87,7 +89,7 @@ pub async fn http_hyper_rt1(
 
             match client.request(req).await {
                 Ok(res) => match discard_body(res).await {
-                    Ok(StatusCode::OK) => statistics.ok(rt_stats),
+                    Ok(StatusCode::OK) => statistics.inc_ok(rt_stats),
                     Ok(code) => statistics.set_http_status(code, rt_stats),
                     Err(ref err) => {
                         statistics.set_error(err.as_ref(), rt_stats);
