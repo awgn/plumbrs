@@ -5,6 +5,8 @@ use crate::client::hyper_h2::*;
 use crate::client::hyper_legacy::*;
 use crate::client::hyper_multichunk::http_hyper_multichunk;
 use crate::client::hyper_rt1::{RequestBody, http_hyper_rt1};
+#[cfg(all(target_os = "linux", feature = "io_uring"))]
+use crate::client::io_uring::*;
 use crate::client::reqwest::*;
 use crate::client::utils::build_http_connection_legacy;
 use crate::metrics::Metrics;
@@ -87,7 +89,14 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
         };
 
         let handle = thread::spawn(move || -> Result<(Statistics, Metrics)> {
-            runtime_engine(id, opts, stats)
+            #[cfg(all(target_os = "linux", feature = "io_uring"))]
+            if matches!(opts.client_type, ClientType::IoUring) {
+                tokio_uring_thread(id, opts, stats)
+            } else {
+                tokio_thread(id, opts, stats)
+            }
+            #[cfg(not(all(target_os = "linux", feature = "io_uring")))]
+            tokio_thread(id, opts, stats)
         });
 
         handles.push(handle);
@@ -273,7 +282,7 @@ fn print_results(
     }
 }
 
-fn runtime_engine(
+fn tokio_thread(
     id: usize,
     opts: Options,
     rt_stats: Arc<Vec<RealtimeStats>>,
@@ -394,6 +403,33 @@ fn runtime_engine(
     Ok((stats, metrics))
 }
 
+#[cfg(all(target_os = "linux", feature = "io_uring"))]
+fn tokio_uring_thread(
+    id: usize,
+    opts: Options,
+    rt_stats: Arc<Vec<RealtimeStats>>,
+) -> Result<(Statistics, Metrics)> {
+    let metrics = Metrics::default();
+    let opts = Arc::new(opts);
+
+    let stats = tokio_uring::builder()
+        .entries(32768) // Large ring size is critical for throughput
+        .uring_builder(
+            tokio_uring::uring_builder()
+                .setup_cqsize(65536)
+                .setup_sqpoll(1),
+        )
+        .start(async move {
+            let handle = tokio_uring::spawn(async move {
+               spawn_tasks(id, opts, rt_stats).await
+            });
+
+            handle.await.unwrap()
+        });
+
+    Ok((stats, metrics))
+}
+
 async fn spawn_tasks(
     id: usize,
     opts: Arc<Options>,
@@ -443,6 +479,10 @@ async fn spawn_tasks(
             ClientType::Reqwest => {
                 tasks.spawn(async move { http_reqwest(id, con, opts, &stats[id]).await });
             }
+            #[cfg(all(target_os = "linux", feature = "io_uring"))]
+            ClientType::IoUring => {
+                tasks.spawn_local(async move { http_io_uring(id, con, opts, &stats[id]).await });
+            },
             ClientType::Help => (),
         }
     }

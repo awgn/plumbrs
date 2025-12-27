@@ -1,6 +1,6 @@
 [package]
 name = "plumbrs"
-version = "0.9.3"
+version = "0.10.0"
 edition = "2024"
 authors = ["Nicola Bonelli <nicola@larthia.com>"]
 description = "A high-performance HTTP/1.1 and HTTP/2 benchmarking tool"
@@ -32,12 +32,17 @@ crossterm = "0.28"
 hdrhistogram = "7.5.4"
 futures-util = "0.3.31"
 tabled = "0.18"
+[target.'cfg(target_os = "linux")'.dependencies]
+tokio-uring = { version = "0.5.0", optional = true }
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = { version = "0.6" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tokio_unstable)'] }
+
+[features]
+io_uring = ["tokio-uring"]
 
 [profile.release]
 debug = false

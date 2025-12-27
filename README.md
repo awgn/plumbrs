@@ -19,7 +19,8 @@ Plumbrs provides ready-to-use benchmarking tasks for several popular HTTP client
 5. Hyper (legacy, one per runtime) (`hyper-rt1`) — Legacy Hyper HTTP client shared across a runtime.
 6. Hyper + h2 (`hyper-h2`) — HTTP/2 client using Hyper with the h2 library (one per connection).
 7. Reqwest (`reqwest`) — Popular Reqwest HTTP client (one per runtime).
-8. Help (`help`) — Print available client types and exit.
+8. IoUring (`io-uring`) — HTTP client using io_uring for high-performance I/O (Linux only).
+9. Help (`help`) — Print available client types and exit.
 
 ## Key features
 
@@ -88,6 +89,7 @@ Plumbrs provides ready-to-use benchmarking tasks for several popular HTTP client
   - `hyper-legacy` — Legacy Hyper client; one per connection. Supports HTTP/1 and HTTP/2.
   - `hyper-rt1` — Legacy Hyper client; one per runtime. Supports HTTP/1 and HTTP/2.
   - `reqwest` — Reqwest client; one per runtime. Supports HTTP/1 and HTTP/2.
+  - `io-uring` — HTTP client using io_uring for high-performance I/O.
   - `help` — Show available client types and exit.
 
 - `--cps`
