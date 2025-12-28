@@ -1,18 +1,9 @@
-use std::{
-    collections::HashSet,
-    convert::Infallible,
-    io,
-    pin::Pin,
-    sync::{Arc, Mutex},
-    task::{Context, Poll},
-    time::Instant,
-};
+use std::{collections::HashSet, sync::Arc, time::Instant};
 
 use bytes::Bytes;
-use http::{Request, Response, StatusCode};
-use http_body_util::{BodyExt, Either, Empty, Full};
-use hyper_util::rt::TokioIo;
-use tokio::io::{duplex, AsyncRead, AsyncWrite};
+use http::{Request, StatusCode};
+use http_body_util::{BodyExt, Either, Full};
+use http_wire::ToWire;
 use tokio_uring::net::TcpStream;
 
 use crate::{
@@ -63,7 +54,10 @@ pub async fn http_io_uring(
     *req.headers_mut() = headers.clone();
 
     // Pre-serialize the request to bytes ONCE outside the loop for better performance
-    let request_bytes = to_bytes(req).await;
+    let request_bytes = req
+        .to_bytes()
+        .await
+        .unwrap_or_else(|e| fatal!(2, "could not serialize request: {e}"));
 
     let start = Instant::now();
     'connection: loop {
@@ -101,8 +95,8 @@ pub async fn http_io_uring(
         // Buffer for reading responses
         let mut connection_buffer = Vec::new();
         let mut read_buf = vec![0u8; 4096];
-        let mut request = request_bytes.clone();
-
+        let request = request_bytes.clone();
+        let mut request: Vec<u8> = request.into();
         loop {
             let start_lat = opts.latency.then_some(Instant::now());
 
@@ -211,7 +205,8 @@ pub fn find_complete_response(buf: &[u8]) -> Option<(usize, StatusCode)> {
 
             if is_chunked {
                 // For chunked encoding, find the terminating "0\r\n\r\n"
-                find_chunked_end(&buf[headers_len..]).map(|body_len| (headers_len + body_len, status_code))
+                find_chunked_end(&buf[headers_len..])
+                    .map(|body_len| (headers_len + body_len, status_code))
             } else if let Some(cl) = content_length {
                 let total_len = headers_len + cl;
                 if buf.len() >= total_len {
@@ -267,113 +262,13 @@ fn find_chunked_end(buf: &[u8]) -> Option<usize> {
 }
 
 /// Find \r\n in buffer, returns position of \r
+#[inline]
 fn find_crlf(buf: &[u8]) -> Option<usize> {
     buf.windows(2).position(|w| w == b"\r\n")
 }
 
 /// Find \r\n\r\n in buffer, returns position after the sequence
+#[inline]
 fn find_double_crlf(buf: &[u8]) -> Option<usize> {
-    buf.windows(4)
-        .position(|w| w == b"\r\n\r\n")
-        .map(|p| p + 4)
-}
-
-/// Socket wrapper that captures written bytes while simulating a real connection
-struct CaptureWrapper {
-    inner: tokio::io::DuplexStream,
-    captured: Arc<Mutex<Vec<u8>>>,
-}
-
-impl CaptureWrapper {
-    fn new(inner: tokio::io::DuplexStream) -> Self {
-        Self {
-            inner,
-            captured: Arc::new(Mutex::new(Vec::new())),
-        }
-    }
-}
-
-impl AsyncRead for CaptureWrapper {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.inner).poll_read(cx, buf)
-    }
-}
-
-impl AsyncWrite for CaptureWrapper {
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<Result<usize, io::Error>> {
-        // Capture the bytes being written
-        self.captured.lock().unwrap().extend_from_slice(buf);
-        Pin::new(&mut self.inner).poll_write(cx, buf)
-    }
-
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-        Pin::new(&mut self.inner).poll_flush(cx)
-    }
-
-    fn poll_shutdown(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), io::Error>> {
-        Pin::new(&mut self.inner).poll_shutdown(cx)
-    }
-}
-
-/// Serialize an HTTP request to raw bytes using hyper's HTTP/1.1 serialization.
-/// This uses a duplex stream to capture the exact bytes that would be sent over the wire.
-pub async fn to_bytes<B>(request: Request<B>) -> Vec<u8>
-where
-    B: http_body_util::BodyExt + Send + 'static,
-    B::Data: Send,
-    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
-{
-    use hyper::service::service_fn;
-
-    let (client, server) = duplex(8192);
-    let capture_client = CaptureWrapper::new(client);
-    let captured_ref = capture_client.captured.clone();
-
-    // Spawn a mock server that will accept the connection and read the request
-    let server_handle = tokio::spawn(async move {
-        let service = service_fn(move |_req: Request<hyper::body::Incoming>| async move {
-            // Return a minimal response
-            Ok::<_, Infallible>(Response::new(Empty::<Bytes>::new()))
-        });
-
-        let _ = hyper::server::conn::http1::Builder::new()
-            .serve_connection(TokioIo::new(server), service)
-            .await;
-    });
-
-    // Send the request through the client side and capture what's written
-    let client_handle = tokio::spawn(async move {
-        let client_connection = hyper::client::conn::http1::Builder::new()
-            .handshake(TokioIo::new(capture_client))
-            .await;
-
-        if let Ok((mut sender, connection)) = client_connection {
-            // Spawn the connection driver
-            tokio::spawn(connection);
-
-            // Send the request
-            let _ = sender.send_request(request).await;
-        }
-    });
-
-    // Wait for the client to send the request
-    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-
-    // Cleanup
-    client_handle.abort();
-    server_handle.abort();
-
-    let result = captured_ref.lock().unwrap().clone();
-    result
+    buf.windows(4).position(|w| w == b"\r\n\r\n").map(|p| p + 4)
 }

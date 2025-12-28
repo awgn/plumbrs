@@ -420,9 +420,7 @@ fn tokio_uring_thread(
                 .setup_sqpoll(1),
         )
         .start(async move {
-            let handle = tokio_uring::spawn(async move {
-               spawn_tasks(id, opts, rt_stats).await
-            });
+            let handle = tokio_uring::spawn(async move { spawn_tasks(id, opts, rt_stats).await });
 
             handle.await.unwrap()
         });
@@ -482,7 +480,7 @@ async fn spawn_tasks(
             #[cfg(all(target_os = "linux", feature = "io_uring"))]
             ClientType::IoUring => {
                 tasks.spawn_local(async move { http_io_uring(id, con, opts, &stats[id]).await });
-            },
+            }
             ClientType::Help => (),
         }
     }
