@@ -63,8 +63,8 @@ pub fn build_headers(
     for (k, v) in &opts.headers {
         headers.append(
             http::header::HeaderName::from_str(k)
-                .unwrap_or_else(|e| fatal!(3, "invalid header name: {e}")),
-            HeaderValue::from_str(v).unwrap_or_else(|e| fatal!(3, "invalid header value: {e}")),
+                .unwrap_or_else(|e| fatal!(2, "invalid header name: {e}")),
+            HeaderValue::from_str(v).unwrap_or_else(|e| fatal!(2, "invalid header value: {e}")),
         );
     }
 
@@ -89,8 +89,8 @@ pub fn build_trailers(
     for (k, v) in &opts.trailers {
         trailers.append(
             http::header::HeaderName::from_str(k)
-                .unwrap_or_else(|e| fatal!(3, "invalid trailer name: {e}")),
-            HeaderValue::from_str(v).unwrap_or_else(|e| fatal!(3, "invalid trailer value: {e}")),
+                .unwrap_or_else(|e| fatal!(2, "invalid trailer name: {e}")),
+            HeaderValue::from_str(v).unwrap_or_else(|e| fatal!(2, "invalid trailer value: {e}")),
         );
     }
 
@@ -100,8 +100,8 @@ pub fn build_trailers(
 #[inline]
 pub fn get_host_port(opts: &Options, uri: &str) -> (String, u16) {
     match &opts.host {
-        None => parse_host_port(uri).unwrap_or_else(|e| fatal!(3, "parse host:port: {e}")),
-        Some(hp) => parse_host_port(hp).unwrap_or_else(|e| fatal!(3, "parse host:port: {e}")),
+        None => parse_host_port(uri).unwrap_or_else(|e| fatal!(1, "parse host:port: {e}")),
+        Some(hp) => parse_host_port(hp).unwrap_or_else(|e| fatal!(1, "parse host:port: {e}")),
     }
 }
 
@@ -403,7 +403,7 @@ pub async fn sse_handshake<B: HttpConnectionBuilder>(
     let (mut sender, conn_task) =
         match B::build_connection::<Full<Bytes>>(endpoint, &mut stats, rt_stats, opts).await {
             Some(s) => s,
-            None => fatal!(2, "handshake connection failed"),
+            None => fatal!(3, "handshake connection failed"),
         };
 
     let mut headers = build_headers(uri.host(), opts)
@@ -423,7 +423,7 @@ pub async fn sse_handshake<B: HttpConnectionBuilder>(
 
     let res = match sender.send_request(req).await {
         Ok(r) => r,
-        Err(e) => fatal!(2, "handshake request failed: {e}"),
+        Err(e) => fatal!(3, "handshake request failed: {e}"),
     };
 
     let mut body = res.into_body();
@@ -447,27 +447,27 @@ pub async fn sse_handshake<B: HttpConnectionBuilder>(
                     }
                 }
             }
-            Some(Err(e)) => fatal!(2, "handshake body error: {e}"),
+            Some(Err(e)) => fatal!(3, "handshake body error: {e}"),
             None => break,
         }
     }
 
     if new_path.is_empty() {
-        fatal!(2, "could not find endpoint in SSE handshake");
+        fatal!(3, "could not find endpoint in SSE handshake");
     }
 
     let new_uri = if new_path.starts_with("http://") || new_path.starts_with("https://") {
         new_path
             .parse::<hyper::Uri>()
-            .unwrap_or_else(|e| fatal!(2, "invalid uri from SSE: {e}"))
+            .unwrap_or_else(|e| fatal!(3, "invalid uri from SSE: {e}"))
     } else {
         let mut parts = uri.clone().into_parts();
         parts.path_and_query = Some(
             new_path
                 .parse()
-                .unwrap_or_else(|e| fatal!(2, "invalid path from SSE: {e}")),
+                .unwrap_or_else(|e| fatal!(3, "invalid path from SSE: {e}")),
         );
-        hyper::Uri::from_parts(parts).unwrap_or_else(|e| fatal!(2, "invalid new uri: {e}"))
+        hyper::Uri::from_parts(parts).unwrap_or_else(|e| fatal!(3, "invalid new uri: {e}"))
     };
 
     let task = tokio::spawn(async move {

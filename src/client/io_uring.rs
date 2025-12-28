@@ -79,7 +79,7 @@ pub async fn http_io_uring(
         // Connect to the endpoint...
         let addr = format!("{host}:{port}")
             .parse()
-            .unwrap_or_else(|e| fatal!(3, "invalid address: {e}"));
+            .unwrap_or_else(|e| fatal!(1, "invalid address: {e}"));
 
         let stream = match TcpStream::connect(addr).await {
             Ok(s) => s,
