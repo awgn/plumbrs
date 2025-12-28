@@ -291,9 +291,25 @@ Using HTTP trailers:
 plumbrs -C hyper -T "X-Checksum:abc123" -T "X-Signature:xyz789" http://localhost:8080
 ```
 
+## Performance
+
+Plumbrs has been benchmarked against popular HTTP load testing tools to evaluate throughput under realistic conditions. The results below show requests per second (RPS) across different client implementations and thread configurations.
+
+### HTTP/1.1 Performance
+
+![HTTP/1.1 Performance](pics/http1_perf.png)
+
+The HTTP/1.1 benchmark compares Plumbrs clients against established tools like `wrk`, `rewrk`, `go-wrk`, and `bombardier`. The `io-uring` client delivers outstanding performance, reaching **382K RPS on a single thread** and scaling to **816K RPS with 3 threads** — outperforming all other tools tested in my tests. The `hyper` client also performs exceptionally well (192K → 595K RPS), surpassing `rewrk` and approaching `wrk` levels. Even the `reqwest` client, despite its higher-level abstraction, maintains competitive throughput (109K → 455K RPS), outperforming both `go-wrk` and `bombardier`.
+
+### HTTP/2 Performance
+
+![HTTP/2 Performance](pics/http2_perf.png)
+
+For HTTP/2, the `hyper-h2` client leads the pack with **187K RPS on a single thread** and **484K RPS with 3 threads**, demonstrating efficient stream multiplexing over a single connection. The standard `hyper` client with HTTP/2 follows closely (134K → 324K RPS), while `hyper-legacy` maintains solid performance (108K → 275K RPS). All Plumbrs HTTP/2 clients outperform `rewrk` (90K → 242K RPS) in this benchmark. The `--http2-initial-stream-window-size` and `--http2-initial-connection-window-size` options can be tuned to further optimize flow control for specific workloads.
+
 ## Enabling Tokio unstable APIs
 
-Some runtime options require Tokio’s unstable APIs. Build with:
+Some runtime options require Tokio's unstable APIs. Build with:
 ```bash
 RUSTFLAGS="--cfg tokio_unstable" cargo build --release
 ```
