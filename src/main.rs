@@ -20,16 +20,11 @@ static GLOBAL: Jemalloc = Jemalloc;
 fn main() -> Result<()> {
     pretty_env_logger::init();
     let mut opts = Options::parse();
-    if opts.uri.is_empty() {
-        println!("Missing URI. Try --help");
-        std::process::exit(1);
-    }
-
-    enforce_consistency(&mut opts)?;
+    check_options(&mut opts)?;
     engine::run_tokio_engines(opts)
 }
 
-fn enforce_consistency(opts: &mut Options) -> Result<()> {
+fn check_options(opts: &mut Options) -> Result<()> {
     if matches!(opts.method, Some(http::Method::TRACE)) && opts.body.len() > 1 {
         return Err(anyhow!("TRACE method cannot have a body!"));
     }
@@ -50,6 +45,21 @@ fn enforce_consistency(opts: &mut Options) -> Result<()> {
     }
 
     match opts.client_type {
+        #[cfg(all(target_os = "linux", feature = "io_uring"))]
+        ClientType::IoUring if opts.http2 => {
+            return Err(anyhow!("HTTP/2 not supported with io-uring client!"));
+        }
+        #[cfg(all(target_os = "linux", feature = "io_uring"))]
+        ClientType::IoUring if opts.multithreaded.unwrap_or(1) > 1 => {
+            return Err(anyhow!(
+                "Multithreaded runtime not supported with io-uring client!"
+            ));
+        }
+        #[cfg(all(target_os = "linux", feature = "io_uring"))]
+        ClientType::IoUring if opts.uri.is_empty() => {
+            println!("Missing URI. Try --help");
+            std::process::exit(1);
+        }
         ClientType::Auto
         | ClientType::HyperLegacy
         | ClientType::Hyper
@@ -57,7 +67,7 @@ fn enforce_consistency(opts: &mut Options) -> Result<()> {
         | ClientType::HyperH2
             if opts.uri.is_empty() =>
         {
-            eprintln!("HTTP uri not specified!");
+            println!("Missing URI. Try --help");
             std::process::exit(1);
         }
         ClientType::HyperLegacy | ClientType::HyperRt1 if opts.host.is_some() => {
@@ -97,6 +107,7 @@ fn enforce_consistency(opts: &mut Options) -> Result<()> {
             println!(
                 "  reqwest           - Reqwest client, one per runtime. Both HTTP/1 and HTTP/2"
             );
+            println!("  io-uring          - IO-uring client, one per thread. Only HTTP/1");
             std::process::exit(0);
         }
         _ => (),

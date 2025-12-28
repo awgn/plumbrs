@@ -189,17 +189,16 @@ pub fn find_complete_response(buf: &[u8]) -> Option<(usize, StatusCode)> {
             // Iterate through the parsed headers
             for header in res.headers.iter() {
                 if header.name.eq_ignore_ascii_case("Content-Length") {
-                    if let Ok(s) = std::str::from_utf8(header.value) {
-                        if let Ok(val) = s.trim().parse::<usize>() {
-                            content_length = Some(val);
-                        }
+                    if let Ok(s) = std::str::from_utf8(header.value)
+                        && let Ok(val) = s.trim().parse::<usize>()
+                    {
+                        content_length = Some(val);
                     }
-                } else if header.name.eq_ignore_ascii_case("Transfer-Encoding") {
-                    if let Ok(s) = std::str::from_utf8(header.value) {
-                        if s.to_lowercase().contains("chunked") {
-                            is_chunked = true;
-                        }
-                    }
+                } else if header.name.eq_ignore_ascii_case("Transfer-Encoding")
+                    && let Ok(s) = std::str::from_utf8(header.value)
+                    && s.to_lowercase().contains("chunked")
+                {
+                    is_chunked = true;
                 }
             }
 
