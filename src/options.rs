@@ -175,6 +175,22 @@ pub struct Options {
         default_value_t = false
     )]
     pub sse: bool,
+
+    #[cfg(all(target_os = "linux", feature = "io_uring"))]
+    #[arg(
+        long,
+        help = "Size of the io_uring Submission Queue (SQ)",
+        default_value_t = 4096
+    )]
+    pub uring_entries: u32,
+
+    #[cfg(all(target_os = "linux", feature = "io_uring"))]
+    #[arg(
+        long,
+        help = "Enable kernel-side submission polling with idle timeout in milliseconds."
+    )]
+    pub uring_sqpoll: Option<u32>,
+
     #[arg(
         help = "Set the host to benchmark (e.g. http://192.168.0.1:8080)",
         long = "host"

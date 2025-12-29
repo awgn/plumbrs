@@ -412,13 +412,22 @@ fn tokio_uring_thread(
     let metrics = Metrics::default();
     let opts = Arc::new(opts);
 
+    let num_entries = opts.uring_entries.next_power_of_two();
+    let cqsize = num_entries * 2;
+
+    let mut uring = tokio_uring::uring_builder();
+
+    uring.setup_single_issuer().setup_cqsize(cqsize);
+
+    if let Some(idle) = opts.uring_sqpoll {
+        uring.setup_sqpoll(idle);
+    } else {
+        uring.setup_coop_taskrun().setup_taskrun_flag();
+    }
+
     let stats = tokio_uring::builder()
-        .entries(32768) // Large ring size is critical for throughput
-        .uring_builder(
-            tokio_uring::uring_builder()
-                .setup_cqsize(65536)
-                .setup_sqpoll(1),
-        )
+        .entries(num_entries) // Large ring size is critical for throughput
+        .uring_builder(&uring)
         .start(async move {
             let handle = tokio_uring::spawn(async move { spawn_tasks(id, opts, rt_stats).await });
 
