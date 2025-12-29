@@ -2,8 +2,6 @@
 
 # Plumbrs — A benchmarking tool for HTTP servers and client libraries in Rust
 
-<img src="pics/plumbrs.gif" alt="plumbrs-logo" style="zoom: 60%;" />
-
 Plumbrs is a benchmarking tool for measuring and comparing HTTP server performance using a variety of asynchronous HTTP client libraries in Rust. It focuses on realistic workloads across servers and client implementations built on Tokio, helping you identify bottlenecks and optimize performance.
 
 ## Overview
