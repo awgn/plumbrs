@@ -299,7 +299,7 @@ Plumbrs has been benchmarked against popular HTTP load testing tools to evaluate
 
 ![HTTP/1.1 Performance](pics/http1_perf.png)
 
-The HTTP/1.1 benchmark compares Plumbrs clients against established tools like `wrk`, `rewrk`, `go-wrk`, and `bombardier`. The `io-uring` client delivers outstanding performance, reaching **382K RPS on a single thread** and scaling to **816K RPS with 3 threads** — outperforming all other tools tested in my tests. The `hyper` client also performs exceptionally well (192K → 595K RPS), surpassing `rewrk` and approaching `wrk` levels. Even the `reqwest` client, despite its higher-level abstraction, maintains competitive throughput (109K → 455K RPS), outperforming both `go-wrk` and `bombardier`.
+The HTTP/1.1 benchmark compares Plumbrs clients against established tools like `wrk`, `rewrk`, `go-wrk`, and `bombardier`. The `io-uring` client delivers outstanding performance, reaching **382K RPS on a single thread** and scaling to **1.05M RPS with 4 threads** — outperforming all other tools tested in my tests. The `hyper` client also performs exceptionally well (198K → 724K RPS), surpassing `wrk` levels. The `hyper-legacy` client maintains solid performance (156K → 569K RPS), while the `reqwest` client, despite its higher-level abstraction, maintains competitive throughput (109K → 397K RPS), outperforming both `go-wrk` and `bombardier`.
 
 ### HTTP/2 Performance
 
