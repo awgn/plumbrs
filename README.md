@@ -303,7 +303,7 @@ The HTTP/1.1 benchmark compares Plumbrs clients against established tools like `
 
 ![HTTP/2 Performance](pics/http2_perf.png)
 
-For HTTP/2, the `hyper-h2` client leads the pack with **187K RPS on a single thread** and **484K RPS with 3 threads**, demonstrating efficient stream multiplexing over a single connection. The standard `hyper` client with HTTP/2 follows closely (134K → 324K RPS), while `hyper-legacy` maintains solid performance (108K → 275K RPS). All Plumbrs HTTP/2 clients outperform `rewrk` (90K → 242K RPS) in this benchmark. The `--http2-initial-stream-window-size` and `--http2-initial-connection-window-size` options can be tuned to further optimize flow control for specific workloads.
+For HTTP/2, the `hyper-h2` client leads the pack with **187K RPS on a single thread** and **689K RPS with 4 threads**, demonstrating efficient stream multiplexing over a single connection. The standard `hyper` client with HTTP/2 follows closely (135K → 580K RPS), while `hyper-legacy` maintains solid performance (109K → 483K RPS). All Plumbrs HTTP/2 clients outperform `rewrk` (100K → 322K RPS) in this benchmark. The `--http2-initial-stream-window-size` and `--http2-initial-connection-window-size` options can be tuned to further optimize flow control for specific workloads.
 
 ## Enabling Tokio unstable APIs
 
