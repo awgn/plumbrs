@@ -7,7 +7,9 @@ use http_wire::ToWire;
 use tokio_uring::net::TcpStream;
 
 use crate::{
-    client::utils::{build_endpoint, build_headers, build_trailers, get_host_port, should_stop},
+    client::utils::{
+        build_conn_endpoint, build_headers, build_trailers, get_conn_address, should_stop,
+    },
     fatal,
     options::Options,
     stats::{RealtimeStats, Statistics},
@@ -24,13 +26,15 @@ pub async fn http_io_uring(
     let mut total: u32 = 0;
     let mut banner = HashSet::new();
     let uri_str = opts.uri[cid % opts.uri.len()].as_str();
-    let (host, port) = get_host_port(&opts, uri_str);
-    let _endpoint = build_endpoint(&host, port);
     let uri = uri_str
         .parse::<hyper::Uri>()
         .unwrap_or_else(|e| fatal!(1, "invalid uri: {e}"));
 
-    let headers = build_headers(uri.host(), opts.as_ref())
+    let (host, port) =
+        get_conn_address(&opts, &uri).unwrap_or_else(|| fatal!(1, "no host specified in uri"));
+    let endpoint = build_conn_endpoint(&host, port);
+
+    let headers = build_headers(&uri, opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
 
     let trailers = build_trailers(opts.as_ref())
@@ -77,7 +81,7 @@ pub async fn http_io_uring(
         }
 
         // Connect to the endpoint...
-        let addr = format!("{host}:{port}")
+        let addr = endpoint
             .parse()
             .unwrap_or_else(|e| fatal!(1, "invalid address: {e}"));
 

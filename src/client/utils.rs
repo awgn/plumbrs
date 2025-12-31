@@ -27,20 +27,12 @@ macro_rules! fatal {
 }
 
 #[inline]
-pub fn parse_host_port(uri: &str) -> Result<(String, u16), <hyper::Uri as FromStr>::Err> {
-    let uri = uri.parse::<hyper::Uri>()?;
-    let host = String::from(uri.host().expect("no host in uri"));
-    let port = uri.port_u16().unwrap_or(80);
-    Ok((host, port))
-}
-
-#[inline]
 pub fn should_stop(total: u32, start: Instant, opts: &Options) -> bool {
     opts.requests.is_some_and(|m| total >= m) || opts.duration.is_some_and(|d| start.elapsed() > d)
 }
 
 pub fn build_headers(
-    host: Option<&str>,
+    uri: &http::Uri,
     opts: &Options,
 ) -> Result<HeaderMap, http::header::InvalidHeaderValue> {
     let mut headers = HeaderMap::new();
@@ -68,10 +60,19 @@ pub fn build_headers(
         );
     }
 
-    if let Some(h) = host
-        && !opts.http2
-    {
-        headers.append(header::HOST, HeaderValue::from_str(h)?);
+    if !opts.http2 {
+        match (uri.host(), uri.port()) {
+            (Some(host), None) => {
+                headers.append(header::HOST, HeaderValue::from_str(host)?);
+            }
+            (Some(host), Some(port)) => {
+                headers.append(
+                    header::HOST,
+                    HeaderValue::from_str(&format!("{}:{}", host, port))?,
+                );
+            }
+            _ => (),
+        }
     }
 
     Ok(headers)
@@ -98,15 +99,22 @@ pub fn build_trailers(
 }
 
 #[inline]
-pub fn get_host_port(opts: &Options, uri: &str) -> (String, u16) {
-    match &opts.host {
-        None => parse_host_port(uri).unwrap_or_else(|e| fatal!(1, "parse host:port: {e}")),
-        Some(hp) => parse_host_port(hp).unwrap_or_else(|e| fatal!(1, "parse host:port: {e}")),
+pub fn get_conn_address(opts: &Options, uri: &hyper::Uri) -> Option<(String, u16)> {
+    let mut host = String::from(uri.host()?);
+    let mut port = uri.port_u16().unwrap_or(if opts.http2 { 443 } else { 80 });
+    if let Some(ref h) = opts.host {
+        host = h.clone();
     }
+
+    if let Some(ref p) = opts.port {
+        port = *p;
+    }
+
+    Some((host, port))
 }
 
 #[inline]
-pub fn build_endpoint(host: &String, port: u16) -> &'static str {
+pub fn build_conn_endpoint(host: &String, port: u16) -> &'static str {
     Box::leak(format!("{}:{}", host, port).into_boxed_str())
 }
 
@@ -406,8 +414,8 @@ pub async fn sse_handshake<B: HttpConnectionBuilder>(
             None => fatal!(3, "handshake connection failed"),
         };
 
-    let mut headers = build_headers(uri.host(), opts)
-        .unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
+    let mut headers =
+        build_headers(uri, opts).unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
 
     headers.append(
         "Content-Type",

@@ -191,11 +191,11 @@ pub struct Options {
     )]
     pub uring_sqpoll: Option<u32>,
 
-    #[arg(
-        help = "Set the host to benchmark (e.g. http://192.168.0.1:8080)",
-        long = "host"
-    )]
+    #[arg(help = "Set the host to connect to (e.g. 192.168.0.1)", long = "host")]
     pub host: Option<String>,
+    #[arg(help = "Set the port to connect to (e.g. 8080)", long = "port")]
+    pub port: Option<u16>,
+
     #[arg(help = "HTTP URIs used in the request (e.g. http://192.168.0.1:80)")]
     pub uri: Vec<String>,
 }

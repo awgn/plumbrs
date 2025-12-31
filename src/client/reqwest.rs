@@ -19,8 +19,13 @@ pub async fn http_reqwest(
     let mut total: u32 = 0;
     let mut banner = HashSet::new();
     let uri_str = opts.uri[cid % opts.uri.len()].as_str();
+    let uri = uri_str
+        .parse::<hyper::Uri>()
+        .unwrap_or_else(|e| fatal!(1, "invalid uri: {e}"));
+
     let url = Url::parse(uri_str).unwrap_or_else(|e| fatal!(1, "invalid url: {e}"));
-    let headers = build_headers(None, opts.as_ref())
+
+    let headers = build_headers(&uri, opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
 
     let body: Option<String> = Some(opts.full_body().map_or_else(
