@@ -27,9 +27,6 @@ pub async fn http_hyper_legacy(
         .parse::<http::Uri>()
         .unwrap_or_else(|e| fatal!(1, "invalid uri: {e}"));
 
-    //let (host, port) = get_conn_address(&opts, &uri).unwrap_or_else(|| fatal!(1, "no host specified in uri"));
-    //let endpoint = build_conn_endpoint(&host, port);
-
     let headers = build_headers(&uri, opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
 

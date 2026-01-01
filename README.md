@@ -38,6 +38,10 @@ Plumbrs is a high-performance HTTP/HTTP2 request generator designed for benchmar
 
 - `--sse` — Enable Server-Sent Events (SSE) handshake. Only available with `auto` or `hyper` client.
 
+- `--host <HOST>` — Override the host to connect to. Not available with `hyper-legacy` or `hyper-rt1`.
+
+- `--port <PORT>` — Override the port to connect to.
+
 - `-v, --verbose` — Enable verbose output.
 
 - `--metrics` — Display Tokio runtime metrics at the end.
@@ -53,10 +57,6 @@ Plumbrs is a high-performance HTTP/HTTP2 request generator designed for benchmar
 - `-B, --body <BODY>` — Request body content. Can be specified multiple times for multi-chunk encoding, but multi-chunk is only supported with `hyper-multichunk` client.
 
 - `-b, --body-from-file <PATH>` — File path for request body (streamed).
-
-- `--host <HOST>` — Override the host to connect to. Not available with `hyper-legacy` or `hyper-rt1`.
-
-- `--port <PORT>` — Override the port to connect to.
 
 - `--http2` — Use HTTP/2 only. Not available with `io-uring` client.
 
