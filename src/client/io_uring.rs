@@ -205,12 +205,12 @@ pub fn find_complete_response(buf: &[u8]) -> Option<(usize, StatusCode)> {
                 let name = header.name.as_bytes();
                 if name.len() == 14 && name.eq_ignore_ascii_case(b"Content-Length") {
                     // Manual fast parse u64
-                    content_len = parse_u64_fast(header.value);
+                    content_len = parse_usize(header.value);
                 } else if name.len() == 17 && name.eq_ignore_ascii_case(b"Transfer-Encoding") {
                     // Check if value contains "chunked" (case insensitive)
                     // We check the last 7 bytes usually, or just linear scan.
                     // Given specific HTTP formatting, it's often exactly "chunked".
-                    is_chunked = is_chunked_fast(header.value);
+                    is_chunked = is_chunked_slice(header.value);
                 }
             }
 
@@ -326,44 +326,58 @@ fn parse_chunked_body(buf: &[u8]) -> Option<usize> {
 
 /// Fast usize parser (decimal).
 #[inline(always)]
-fn parse_u64_fast(buf: &[u8]) -> Option<usize> {
-    let mut res = 0usize;
+fn parse_usize(buf: &[u8]) -> Option<usize> {
+    let mut res: usize = 0;
+    let mut found = false;
+
     for &b in buf {
-        if b >= b'0' && b <= b'9' {
+        if b.is_ascii_digit() {
+            // Check for overflow could be added here if needed,
+            // but wrapping is standard for "fast" parsing logic.
             res = res.wrapping_mul(10).wrapping_add((b - b'0') as usize);
+            found = true;
+        } else if found {
+            // We were parsing numbers, now we hit a non-digit: stop.
+            break;
+        } else if b == b' ' || b == b'\t' {
+            // Skip leading whitespace
+            continue;
         } else {
-            // Stop at first non-digit (trimming whitespace implicitly)
-            if res > 0 || buf.len() == 1 {
-                return Some(res);
-            }
+            // Found a non-digit before any digit (e.g., letters)
+            return None;
         }
     }
-    Some(res)
+
+    if found {
+        Some(res)
+    } else {
+        None
+    }
 }
 
 /// Check for "chunked" case-insensitive.
 #[inline(always)]
-fn is_chunked_fast(buf: &[u8]) -> bool {
-    // "chunked" is 7 chars.
-    if buf.len() < 7 {
+fn is_chunked_slice(buf: &[u8]) -> bool {
+    let mut start = 0;
+    while start < buf.len() && matches!(buf[start], b' ' | b'\t') {
+        start += 1;
+    }
+
+    let mut end = buf.len();
+    while end > start && matches!(buf[end - 1], b' ' | b'\t' | b'\r' | b'\n') {
+        end -= 1;
+    }
+
+    let sliced = &buf[start..end];
+    if sliced.len() != 7 {
         return false;
     }
 
-    // Often header value is exactly "chunked" or "chunked\r\n"
-    // Iterate to find the substring
-    for window in buf.windows(7) {
-        let mut m = true;
-        for (i, &b) in window.iter().enumerate() {
-            // 'c' or 'C' | 'h' or 'H' ...
-            let target = b"chunked"[i];
-            if b != target && b != (target - 32) {
-                m = false;
-                break;
-            }
-        }
-        if m {
-            return true;
-        }
-    }
-    false
+    (sliced[0] | 0x20) == b'c' &&
+    (sliced[1] | 0x20) == b'h' &&
+    (sliced[2] | 0x20) == b'u' &&
+    (sliced[3] | 0x20) == b'n' &&
+    (sliced[4] | 0x20) == b'k' &&
+    (sliced[5] | 0x20) == b'e' &&
+    (sliced[6] | 0x20) == b'd'
 }
