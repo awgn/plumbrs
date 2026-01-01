@@ -179,99 +179,191 @@ pub async fn http_io_uring(
 
 /// Find the end of a complete HTTP/1.1 response using the `httparse` crate.
 /// Returns the total length of the response and the status code if complete.
+#[inline(always)]
 pub fn find_complete_response(buf: &[u8]) -> Option<(usize, StatusCode)> {
-    let mut headers = [httparse::EMPTY_HEADER; 64];
+    // Determine headers array size. 32 is standard, but keeping it on stack is fast.
+    let mut headers = [httparse::EMPTY_HEADER; 32];
     let mut res = httparse::Response::new(&mut headers);
 
+    // 1. Parse Headers
     match res.parse(buf) {
         Ok(httparse::Status::Complete(headers_len)) => {
-            let status_code = StatusCode::from_u16(res.code.unwrap_or(0)).unwrap_or(StatusCode::OK);
+            let code = res.code.unwrap_or(200);
+            let status_code = StatusCode::from_u16(code).unwrap_or(StatusCode::OK);
 
-            let mut content_length: Option<usize> = None;
+            // Fast path for responses that never have a body (1xx, 204, 304)
+            // Note: 1xx responses usually continue, but for a single response frame logic:
+            if code == 204 || code == 304 || (code >= 100 && code < 200) {
+                return Some((headers_len, status_code));
+            }
+
+            let mut content_len: Option<usize> = None;
             let mut is_chunked = false;
 
-            // Iterate through the parsed headers
+            // 2. Scan headers (Optimized Loop)
             for header in res.headers.iter() {
-                if header.name.eq_ignore_ascii_case("Content-Length") {
-                    if let Ok(s) = std::str::from_utf8(header.value)
-                        && let Ok(val) = s.trim().parse::<usize>()
-                    {
-                        content_length = Some(val);
-                    }
-                } else if header.name.eq_ignore_ascii_case("Transfer-Encoding")
-                    && let Ok(s) = std::str::from_utf8(header.value)
-                    && s.to_lowercase().contains("chunked")
-                {
-                    is_chunked = true;
+                let name = header.name.as_bytes();
+                if name.len() == 14 && name.eq_ignore_ascii_case(b"Content-Length") {
+                    // Manual fast parse u64
+                    content_len = parse_u64_fast(header.value);
+                } else if name.len() == 17 && name.eq_ignore_ascii_case(b"Transfer-Encoding") {
+                    // Check if value contains "chunked" (case insensitive)
+                    // We check the last 7 bytes usually, or just linear scan.
+                    // Given specific HTTP formatting, it's often exactly "chunked".
+                    is_chunked = is_chunked_fast(header.value);
                 }
             }
 
+            // 3. Calculate Body End
             if is_chunked {
-                // For chunked encoding, find the terminating "0\r\n\r\n"
-                find_chunked_end(&buf[headers_len..])
-                    .map(|body_len| (headers_len + body_len, status_code))
-            } else if let Some(cl) = content_length {
-                let total_len = headers_len + cl;
-                if buf.len() >= total_len {
-                    Some((total_len, status_code))
+                let body_len = parse_chunked_body(&buf[headers_len..])?;
+                Some((headers_len + body_len, status_code))
+            } else {
+                // If content-length is missing, length is 0 (unless connection close,
+                // but for parsing complete frames we assume 0).
+                let len = content_len.unwrap_or(0);
+                let total = headers_len + len;
+                if buf.len() >= total {
+                    Some((total, status_code))
                 } else {
                     None
                 }
-            } else {
-                // No Content-Length and not chunked - assume headers only (like 204 No Content)
-                // or wait for connection close
-                Some((headers_len, status_code))
             }
         }
-        _ => None,
+        _ => None, // Partial or Error
     }
 }
 
-/// Find the end of chunked transfer encoding body
-fn find_chunked_end(buf: &[u8]) -> Option<usize> {
+/// Highly optimized hex parser for chunk sizes.
+/// Returns the total length of the chunked body (including the final 0\r\n\r\n).
+#[inline]
+fn parse_chunked_body(buf: &[u8]) -> Option<usize> {
     let mut pos = 0;
+    let len = buf.len();
 
     loop {
-        // Find the end of chunk size line
-        let chunk_size_end = find_crlf(&buf[pos..])?;
-        let chunk_size_str = std::str::from_utf8(&buf[pos..pos + chunk_size_end]).ok()?;
+        if pos >= len {
+            return None;
+        }
 
-        // Parse chunk size (may include extensions after semicolon)
-        let chunk_size_hex = chunk_size_str.split(';').next()?;
-        let chunk_size = usize::from_str_radix(chunk_size_hex.trim(), 16).ok()?;
+        // Find CRLF fast.
+        // We only scan a limited window because chunk sizes are usually small strings.
+        let mut i = pos;
+        let mut found_crlf = false;
 
-        // Move past chunk size line (including \r\n)
-        pos += chunk_size_end + 2;
+        // Scan for LF. The max chunk size line usually isn't massive.
+        while i < len {
+            if buf[i] == b'\n' {
+                found_crlf = true;
+                break;
+            }
+            i += 1;
+        }
+
+        if !found_crlf {
+            return None;
+        } // Incomplete chunk size line
+
+        // Parse hex from pos to i-1 (ignoring \r)
+        // i points to \n, i-1 should be \r.
+        if i == 0 || buf[i - 1] != b'\r' {
+            return None;
+        } // Invalid format
+
+        let hex_end = i - 1;
+        // Parse hex digits until semicolon (extension) or end of line
+        let mut chunk_size = 0usize;
+        for &b in &buf[pos..hex_end] {
+            if b == b';' {
+                break;
+            } // Ignore chunk extensions
+
+            let val = match b {
+                b'0'..=b'9' => b - b'0',
+                b'a'..=b'f' => b - b'a' + 10,
+                b'A'..=b'F' => b - b'A' + 10,
+                _ => continue, // Skip whitespace or invalid chars silently for speed
+            };
+
+            // Check overflow if necessary, but for HTTP chunks usize is usually enough
+            chunk_size = (chunk_size << 4) | (val as usize);
+        }
+
+        // Move pos after the \n
+        pos = i + 1;
 
         if chunk_size == 0 {
-            // Last chunk - expect trailing \r\n (and possibly trailers)
-            if buf.len() >= pos + 2 && &buf[pos..pos + 2] == b"\r\n" {
+            // Last chunk. Need to skip trailers and find final empty line (\r\n).
+            // Current pos is after "0\r\n".
+            // The simplest end is immediately "\r\n".
+            if pos + 2 <= len && &buf[pos..pos + 2] == b"\r\n" {
                 return Some(pos + 2);
             }
-            // Check for trailers (simplified - just look for \r\n\r\n)
-            if let Some(trailer_end) = find_double_crlf(&buf[pos..]) {
-                return Some(pos + trailer_end);
+            // If there are trailers, we need to scan for \r\n\r\n
+            // Scanning for double CRLF
+            let mut k = pos;
+            while k + 3 < len {
+                if buf[k] == b'\r'
+                    && buf[k + 1] == b'\n'
+                    && buf[k + 2] == b'\r'
+                    && buf[k + 3] == b'\n'
+                {
+                    return Some(k + 4);
+                }
+                k += 1;
             }
-            return None;
+            return None; // Incomplete trailers
         }
 
-        // Move past chunk data and trailing \r\n
-        let chunk_end = pos + chunk_size + 2;
-        if buf.len() < chunk_end {
-            return None;
+        // Check if full chunk is available: data (chunk_size) + CRLF (2)
+        let next_start = pos + chunk_size + 2;
+        if next_start > len {
+            return None; // Incomplete chunk data
         }
-        pos = chunk_end;
+        pos = next_start;
     }
 }
 
-/// Find \r\n in buffer, returns position of \r
-#[inline]
-fn find_crlf(buf: &[u8]) -> Option<usize> {
-    buf.windows(2).position(|w| w == b"\r\n")
+/// Fast usize parser (decimal).
+#[inline(always)]
+fn parse_u64_fast(buf: &[u8]) -> Option<usize> {
+    let mut res = 0usize;
+    for &b in buf {
+        if b >= b'0' && b <= b'9' {
+            res = res.wrapping_mul(10).wrapping_add((b - b'0') as usize);
+        } else {
+            // Stop at first non-digit (trimming whitespace implicitly)
+            if res > 0 || buf.len() == 1 {
+                return Some(res);
+            }
+        }
+    }
+    Some(res)
 }
 
-/// Find \r\n\r\n in buffer, returns position after the sequence
-#[inline]
-fn find_double_crlf(buf: &[u8]) -> Option<usize> {
-    buf.windows(4).position(|w| w == b"\r\n\r\n").map(|p| p + 4)
+/// Check for "chunked" case-insensitive.
+#[inline(always)]
+fn is_chunked_fast(buf: &[u8]) -> bool {
+    // "chunked" is 7 chars.
+    if buf.len() < 7 {
+        return false;
+    }
+
+    // Often header value is exactly "chunked" or "chunked\r\n"
+    // Iterate to find the substring
+    for window in buf.windows(7) {
+        let mut m = true;
+        for (i, &b) in window.iter().enumerate() {
+            // 'c' or 'C' | 'h' or 'H' ...
+            let target = b"chunked"[i];
+            if b != target && b != (target - 32) {
+                m = false;
+                break;
+            }
+        }
+        if m {
+            return true;
+        }
+    }
+    false
 }
