@@ -81,9 +81,9 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
 
         loop {
             let stream = opts
-                .stream_body()
+                .stream_bodies()
                 .await
-                .unwrap_or_else(|e| fatal!(2, "could not build stream body: {e}"));
+                .unwrap_or_else(|e| fatal!(2, "could not read stream of body: {e}"));
             let stream =
                 stream.map(|chunk| Ok::<_, std::convert::Infallible>(Frame::data(chunk.unwrap())));
             let body = match &trailers {

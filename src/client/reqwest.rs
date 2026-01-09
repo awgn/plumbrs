@@ -28,10 +28,14 @@ pub async fn http_reqwest(
     let headers = build_headers(&uri, opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
 
-    let body: Option<String> = Some(opts.full_body().map_or_else(
+    let bodies: Vec<String> = opts.bodies().map_or_else(
         |e| fatal!(2, "could not read body: {e}"),
-        |b| String::from_utf8_lossy(&b).to_string(),
-    ));
+        |v| {
+            v.into_iter()
+                .map(|b| String::from_utf8_lossy(&b).to_string())
+                .collect()
+        },
+    );
 
     let start = Instant::now();
     'connection: loop {
@@ -59,13 +63,15 @@ pub async fn http_reqwest(
         statistics.inc_conn();
 
         loop {
+            let body = bodies.get(total as usize).or(bodies.last());
+
             let mut req = Request::new(
                 opts.method.clone().unwrap_or(http::Method::GET),
                 url.clone(),
             );
             *req.headers_mut() = headers.clone();
 
-            if let Some(ref body) = body {
+            if let Some(body) = body {
                 *req.body_mut() = Some(body.clone().into());
             }
 

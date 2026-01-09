@@ -40,9 +40,15 @@ pub async fn http_io_uring(
     let trailers = build_trailers(opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build trailers: {e}"));
 
-    let body: Full<Bytes> = opts
-        .full_body()
-        .map_or_else(|e| fatal!(2, "could not read body: {e}"), Full::new);
+    let bodies: Vec<Full<Bytes>> = opts.bodies().map_or_else(
+        |e| fatal!(2, "could not read body: {e}"),
+        |b| b.into_iter().map(Full::new).collect::<Vec<_>>(),
+    );
+
+    let body = bodies
+        .first()
+        .cloned()
+        .unwrap_or_else(|| Full::new(Bytes::new()));
 
     let body = match &trailers {
         None => Either::Left(body.clone()),

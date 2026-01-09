@@ -35,8 +35,8 @@ pub async fn http_hyper_h2(
         get_conn_address(&opts, &uri).unwrap_or_else(|| fatal!(1, "no host specified in uri"));
     let endpoint = build_conn_endpoint(&host, port);
 
-    let body: Bytes = opts
-        .full_body()
+    let bodies: Vec<Bytes> = opts
+        .bodies()
         .unwrap_or_else(|e| fatal!(2, "could not read body: {e}"));
 
     // http/2 use :authority: instead of Host header...
@@ -120,6 +120,8 @@ pub async fn http_hyper_h2(
         statistics.inc_conn();
 
         loop {
+            let body = bodies.get(total as usize).or(bodies.last());
+
             let mut req = Request::new(());
             *req.method_mut() = opts.method.clone().unwrap_or(http::Method::GET);
             *req.uri_mut() = uri.clone();
@@ -133,8 +135,7 @@ pub async fn http_hyper_h2(
                 }
             };
 
-            let end_of_stream = body.is_empty() && trailers.is_none();
-
+            let end_of_stream = body.is_none() && trailers.is_none();
             let start_lat = opts.latency.then_some(Instant::now());
 
             let (response, mut send_stream) = match h2_client.send_request(req, end_of_stream) {
@@ -146,7 +147,7 @@ pub async fn http_hyper_h2(
                 }
             };
 
-            if !body.is_empty() {
+            if let Some(body) = body {
                 let end_of_stream = trailers.is_none();
                 send_stream.send_data(body.clone(), end_of_stream).unwrap();
             }

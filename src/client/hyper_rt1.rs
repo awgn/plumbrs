@@ -48,8 +48,8 @@ pub async fn http_hyper_rt1(
     let trailers = build_trailers(opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build trailers: {e}"));
 
-    let body_bytes: Bytes = opts
-        .full_body()
+    let bodies: Vec<Bytes> = opts
+        .bodies()
         .unwrap_or_else(|e| fatal!(2, "could not read body: {e}"));
 
     let start = Instant::now();
@@ -71,12 +71,13 @@ pub async fn http_hyper_rt1(
         statistics.inc_conn();
 
         loop {
+            let body_bytes = bodies.get(total as usize).or(bodies.last());
+            let bytes = body_bytes.unwrap_or(&Bytes::new()).clone();
+
             let body: RequestBody = if let Some(tr) = trailers.clone() {
-                Either::Right(
-                    Full::new(body_bytes.clone()).with_trailers(std::future::ready(Some(Ok(tr)))),
-                )
+                Either::Right(Full::new(bytes).with_trailers(std::future::ready(Some(Ok(tr)))))
             } else {
-                Either::Left(Full::new(body_bytes.clone()))
+                Either::Left(Full::new(bytes))
             };
             let mut req = Request::builder()
                 .method(opts.method.clone().unwrap_or(http::Method::GET))

@@ -8,16 +8,26 @@ use anyhow::{Result, anyhow};
 use clap::Parser;
 use client::ClientType;
 
+use crossterm::{cursor, execute};
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
 
 use crate::options::Options;
+use ctor::dtor;
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
+#[dtor]
+fn cleanup() {
+    _ = execute!(std::io::stdout(), cursor::Show);
+}
+
 fn main() -> Result<()> {
+    // Hide cursor and ensure it's restored on exit
+    _ = execute!(std::io::stdout(), cursor::Hide);
+
     pretty_env_logger::init();
     let mut opts = Options::parse();
     check_options(&mut opts)?;
@@ -30,7 +40,7 @@ fn check_options(opts: &mut Options) -> Result<()> {
     }
 
     if opts.method.is_none() {
-        if opts.body.is_empty() && opts.body_path.is_none() {
+        if opts.body.is_empty() {
             opts.method = Some(http::Method::GET);
         } else {
             opts.method = Some(http::Method::POST);
@@ -75,17 +85,6 @@ fn check_options(opts: &mut Options) -> Result<()> {
         }
         ClientType::Reqwest if !opts.trailers.is_empty() => {
             return Err(anyhow!("Trailers not supported with reqwest client!"));
-        }
-        ClientType::Hyper
-        | ClientType::HyperLegacy
-        | ClientType::HyperRt1
-        | ClientType::HyperH2
-        | ClientType::Reqwest
-            if opts.body.len() > 1 =>
-        {
-            return Err(anyhow!(
-                "Multi-chunked body only supported with hyper-multichunk client!"
-            ));
         }
         ClientType::Help => {
             println!("Available client types:");

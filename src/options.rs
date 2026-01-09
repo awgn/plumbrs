@@ -1,4 +1,4 @@
-use std::{convert::Infallible, path::PathBuf, time::Duration};
+use std::{convert::Infallible, time::Duration};
 
 use crate::client::ClientType;
 use anyhow::Result;
@@ -6,7 +6,6 @@ use bytes::Bytes;
 use clap::Parser;
 use futures_util::StreamExt;
 use http::{Method, method::InvalidMethod};
-use tokio::io;
 use tokio_util::either::Either;
 
 #[derive(Parser, Debug, Clone)]
@@ -77,17 +76,11 @@ pub struct Options {
     #[arg(help = "HTTP trailers", short = 'T', long = "trailer", value_parser = parse_key_val)]
     pub trailers: Vec<(String, String)>,
     #[arg(
-        help = "Body of the request; can be specified multiple times for multi-chunk encoding",
-        short = 'B',
+        help = "Body of the request; can be specified multiple times. @path read body from file",
+        short = 'b',
         long = "body"
     )]
     pub body: Vec<String>,
-    #[arg(
-        help = "File path for the body of the request",
-        short = 'b',
-        long = "body-from-file"
-    )]
-    pub body_path: Option<PathBuf>,
     #[arg(
         help = "Open a new connection for every request, computing Connections Per Second",
         long = "cps",
@@ -201,31 +194,51 @@ pub struct Options {
 }
 
 impl Options {
-    pub fn full_body(&self) -> Result<Bytes, io::Error> {
-        if let Some(path) = &self.body_path {
-            let data = std::fs::read(path)?;
-            Ok(data.into())
-        } else if !self.body.is_empty() {
-            let data = self.body.join("");
-            Ok(data.into())
-        } else {
-            Ok(Bytes::default())
+    pub fn bodies(&self) -> Result<Vec<Bytes>> {
+        let mut bodies = Vec::new();
+        for body in self.body.iter() {
+            bodies.push(load_body_content(body)?);
         }
+        Ok(bodies)
     }
 
-    pub async fn stream_body(
+    pub async fn stream_bodies(
         &self,
     ) -> Result<impl futures_util::Stream<Item = Result<Bytes, Infallible>> + Send + use<>> {
-        if let Some(path) = &self.body_path {
-            let file = tokio::fs::File::open(path).await?;
+        // Constraint: @file cannot be mixed with other body chunks
+        let has_file = self.body.iter().any(|b| b.starts_with('@'));
+        if has_file && self.body.len() > 1 {
+            anyhow::bail!(
+                "file body (@path) cannot be mixed with other body chunks; use either a single @file or multiple in-memory chunks"
+            );
+        }
+
+        // If there's exactly one body arg that starts with '@', stream it from file
+        if self.body.len() == 1 && self.body[0].starts_with('@') {
+            let file_path = &self.body[0][1..];
+            let file = tokio::fs::File::open(file_path).await?;
             let stream = tokio_util::io::ReaderStream::new(file);
             Ok(Either::Left(stream.map(|r| Ok(r.unwrap()))))
         } else {
-            let chunks: Vec<Bytes> = self.body.iter().map(|s| Bytes::from(s.clone())).collect();
+            let chunks: Vec<Bytes> = self
+                .body
+                .iter()
+                .map(|s| Bytes::from(s.to_owned()))
+                .collect();
             let stream = futures_util::stream::iter(chunks.into_iter().map(Ok));
             Ok(Either::Right(stream))
         }
     }
+}
+
+pub fn load_body_content(content: &str) -> Result<Bytes> {
+    // Remove @ prefix and treat as file path
+    if let Some(file_path) = content.strip_prefix('@') {
+        let file_content = std::fs::read(file_path)?;
+        return Ok(Bytes::from(file_content));
+    }
+
+    Ok(Bytes::from(content.to_string()))
 }
 
 fn parse_secs(arg: &str) -> Result<Duration, std::num::ParseIntError> {

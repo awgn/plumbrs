@@ -33,9 +33,10 @@ pub async fn http_hyper_legacy(
     let trailers = build_trailers(opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build trailers: {e}"));
 
-    let body: Full<Bytes> = opts
-        .full_body()
-        .map_or_else(|e| fatal!(2, "could not read body: {e}"), Full::new);
+    let bodies: Vec<Full<Bytes>> = opts.bodies().map_or_else(
+        |e| fatal!(2, "could not read body: {e}"),
+        |v| v.into_iter().map(Full::new).collect(),
+    );
 
     let start = Instant::now();
     'connection: loop {
@@ -58,6 +59,12 @@ pub async fn http_hyper_legacy(
         statistics.inc_conn();
 
         loop {
+            let body = bodies
+                .get(total as usize)
+                .or(bodies.last())
+                .cloned()
+                .unwrap_or_else(|| Full::new(Bytes::from("")));
+
             let body = match &trailers {
                 None => Either::Left(body.clone()),
                 tr => {

@@ -21,7 +21,6 @@ use std::time::Duration;
 use std::time::Instant;
 
 use crossterm::{cursor, execute, terminal};
-use scopeguard::defer;
 use tokio::runtime::Builder;
 use tokio::task::JoinSet;
 
@@ -115,9 +114,7 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
     );
 
     let total = total_stats;
-
     print_results(&total, duration, opts.threads, opts.metrics, &total_metrics);
-
     Ok(())
 }
 
@@ -511,13 +508,6 @@ async fn spawn_tasks(
 pub async fn meter(rt_stats: Arc<Vec<RealtimeStats>>) {
     const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     let mut spinner_idx = 0;
-
-    // Hide cursor and ensure it's restored on exit
-    let _ = execute!(std::io::stdout(), cursor::Hide);
-
-    defer! {
-        let _ = execute!(std::io::stdout(), cursor::Show);
-    }
 
     loop {
         tokio::time::sleep(Duration::from_millis(1000)).await;
