@@ -36,7 +36,7 @@ Plumbrs is a high-performance HTTP/HTTP2 request generator designed for benchmar
 
 - `--latency` — Enable latency estimation using Gil Tene's coordinated omission correction algorithm.
 
-- `--sse` — Enable Server-Sent Events (SSE) handshake. Only available with `auto` or `hyper` client.
+- `--sse` — Force transport Server-Sent Events (SSE) for hyper-mcp. Only available with `auto` or `hyper-mcp` client.
 
 - `--host <HOST>` — Override the host to connect to. Not available with `hyper-legacy` or `hyper-rt1`.
 

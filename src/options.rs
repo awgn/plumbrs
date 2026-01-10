@@ -163,11 +163,11 @@ pub struct Options {
     #[arg(help = "Set whether HTTP/0.9 responses should be tolerated.", long)]
     pub http09_responses: bool,
     #[arg(
-        help = "Enable Server-Sent Events (SSE) handshake.",
-        long = "sse",
+        help = "Force Server-Sent Events (SSE) transport for hyper-mcp.",
+        long = "sse-mcp",
         default_value_t = false
     )]
-    pub sse: bool,
+    pub sse_mcp: bool,
 
     #[cfg(all(target_os = "linux", feature = "io_uring"))]
     #[arg(

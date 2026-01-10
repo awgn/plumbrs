@@ -35,28 +35,13 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
     let mut total: u32 = 0;
     let mut banner = HashSet::new();
     let uri_str = opts.uri[cid % opts.uri.len()].as_str();
-    let mut uri = uri_str
+    let uri = uri_str
         .parse::<hyper::Uri>()
         .unwrap_or_else(|e| fatal!(1, "invalid uri: {e}"));
 
-    let (mut host, mut port) =
+    let (host, port) =
         get_conn_address(&opts, &uri).unwrap_or_else(|| fatal!(1, "no host specified in uri"));
-    let mut endpoint = build_conn_endpoint(&host, port);
-
-    if opts.sse {
-        let (new_uri, _task) = sse_handshake::<B>(endpoint, &uri, &opts, rt_stats).await;
-        uri = new_uri;
-
-        if opts.host.is_none() {
-            if let Some(h) = uri.host() {
-                host = h.to_owned();
-            }
-            if let Some(p) = uri.port_u16() {
-                port = p;
-            }
-            endpoint = build_conn_endpoint(&host, port);
-        }
-    }
+    let endpoint = build_conn_endpoint(&host, port);
 
     let headers = build_headers(&uri, opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));

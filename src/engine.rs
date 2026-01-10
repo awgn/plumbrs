@@ -3,6 +3,8 @@ use crate::client::ClientType;
 use crate::client::hyper::*;
 use crate::client::hyper_h2::*;
 use crate::client::hyper_legacy::*;
+#[cfg(feature = "mcp")]
+use crate::client::hyper_mcp::http_hyper_mcp;
 use crate::client::hyper_multichunk::http_hyper_multichunk;
 use crate::client::hyper_rt1::{RequestBody, http_hyper_rt1};
 #[cfg(all(target_os = "linux", feature = "io_uring"))]
@@ -459,7 +461,18 @@ async fn spawn_tasks(
                         async move { http_hyper_multichunk(id, con, opts, &stats[id]).await },
                     );
                 } else {
-                    tasks.spawn(async move { http_hyper(id, con, opts, &stats[id]).await });
+                    #[cfg(feature = "mcp")]
+                    {
+                        if opts.sse_mcp {
+                            tasks.spawn(async move { http_hyper_mcp(id, con, opts, &stats[id]).await });
+                        } else {
+                            tasks.spawn(async move { http_hyper(id, con, opts, &stats[id]).await });
+                        }
+                    }
+                    #[cfg(not(feature = "mcp"))]
+                    {
+                        tasks.spawn(async move { http_hyper(id, con, opts, &stats[id]).await });
+                    }
                 }
             }
             ClientType::Hyper => {
@@ -479,6 +492,10 @@ async fn spawn_tasks(
             }
             ClientType::HyperH2 => {
                 tasks.spawn(async move { http_hyper_h2(id, con, opts, &stats[id]).await });
+            }
+            #[cfg(feature = "mcp")]
+            ClientType::HyperMcp => {
+                tasks.spawn(async move { http_hyper_mcp(id, con, opts, &stats[id]).await });
             }
             ClientType::Reqwest => {
                 tasks.spawn(async move { http_reqwest(id, con, opts, &stats[id]).await });
