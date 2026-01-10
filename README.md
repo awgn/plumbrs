@@ -8,6 +8,7 @@ Plumbrs is a high-performance HTTP/HTTP2 request generator designed for benchmar
 
 - **Auto** (`auto`) — Automatically select the best client (default).
 - **Hyper** (`hyper`) — Hyper-based HTTP client (one per connection).
+- **Hyper MCP** (`hyper-mcp`) — Hyper client for MCP (Model Context Protocol) servers (requires `mcp` feature).
 - **Hyper multichunk** (`hyper-multichunk`) — Hyper client with multi-chunked body (one per connection).
 - **Hyper legacy** (`hyper-legacy`) — Legacy Hyper HTTP client (one per connection).
 - **Hyper RT1** (`hyper-rt1`) — Legacy Hyper HTTP client shared across a runtime.
@@ -36,7 +37,7 @@ Plumbrs is a high-performance HTTP/HTTP2 request generator designed for benchmar
 
 - `--latency` — Enable latency estimation using Gil Tene's coordinated omission correction algorithm.
 
-- `--sse` — Force transport Server-Sent Events (SSE) for hyper-mcp. Only available with `auto` or `hyper-mcp` client.
+
 
 - `--host <HOST>` — Override the host to connect to. Not available with `hyper-legacy` or `hyper-rt1`.
 
@@ -59,6 +60,33 @@ Plumbrs is a high-performance HTTP/HTTP2 request generator designed for benchmar
 - `-b, --body-from-file <PATH>` — File path for request body (streamed).
 
 - `--http2` — Use HTTP/2 only. Not available with `io-uring` client.
+
+## MCP options (requires `mcp` feature)
+
+Plumbrs supports benchmarking [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) servers. MCP is a protocol for communication between AI applications and tool servers, using JSON-RPC over HTTP.
+
+When MCP mode is enabled, Plumbrs will:
+1. Perform the MCP handshake (initialize, initialized notification)
+2. Discover available tools via `tools/list`
+3. Benchmark the server by repeatedly calling the discovered tools
+
+Two transport modes are supported:
+
+- `--mcp` — Enable MCP mode with **Streamable HTTP** transport (recommended). This is the newer transport where JSON-RPC requests and responses flow over standard HTTP POST requests. The server returns a session ID via the `Mcp-Session-Id` header.
+
+- `--mcp-sse` — Enable MCP mode with legacy **Server-Sent Events (SSE)** transport. This older transport uses a persistent SSE connection for receiving responses while sending requests via separate HTTP POST calls.
+
+Both options are only available with `auto` or `hyper-mcp` client types.
+
+**Example — Benchmark an MCP server with Streamable HTTP:**
+```
+plumbrs -c 10 -d 30 http://localhost:3001/mcp --mcp
+```
+
+**Example — Benchmark an MCP server with SSE transport:**
+```
+plumbrs -c 10 -d 30 http://localhost:3001/sse --mcp-sse
+```
 
 ## HTTP/1 tuning options
 
