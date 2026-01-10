@@ -66,7 +66,7 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
         get_conn_address(&opts, &uri).unwrap_or_else(|| fatal!(1, "no host specified in uri"));
     let mut endpoint = build_conn_endpoint(&host, port);
 
-    // For SSE transport, initialize before connection loop (uses reqwest internally)
+    // For SSE transport, initialize before connection loop
     let mut mcp = McpSetup::default();
     if opts.mcp_sse {
         mcp = mcp_sse_initialize(uri_str).await;
@@ -97,6 +97,12 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
         http::header::HeaderValue::from_static("application/json, text/event-stream"),
     );
 
+    let transport = if opts.mcp_sse {
+        "sse"
+    } else {
+        "streamableHttp"
+    };
+
     let start = Instant::now();
     'connection: loop {
         if should_stop(total, start, &opts) {
@@ -106,7 +112,7 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
         if cid < opts.uri.len() && !banner.contains(uri_str) {
             banner.insert(uri_str.to_owned());
             println!(
-                "hyper-mcp [{tid:>2}] -> connecting to {}:{}, method = POST uri = {} {}...",
+                "hyper-mcp [{tid:>2}] -> connecting to {}:{}, method = POST uri = {} {} (transport {transport})...",
                 host,
                 port,
                 uri,
@@ -246,7 +252,7 @@ where
         request: init_request,
     };
 
-    let init_body = serde_json::to_string(&init_jsonrpc)?;
+    let init_body = serde_json::to_vec(&init_jsonrpc)?;
 
     let mut req = Request::new(Full::new(Bytes::from(init_body)));
     *req.method_mut() = http::Method::POST;
@@ -323,7 +329,7 @@ where
         notification: initialized_notif,
     };
 
-    let initialized_body = serde_json::to_string(&notif_jsonrpc)?;
+    let initialized_body = serde_json::to_vec(&notif_jsonrpc)?;
 
     let mut req = Request::new(Full::new(Bytes::from(initialized_body)));
     *req.method_mut() = http::Method::POST;
@@ -365,7 +371,7 @@ where
         request: tools_list_request,
     };
 
-    let tools_list_body = serde_json::to_string(&tools_list_jsonrpc)?;
+    let tools_list_body = serde_json::to_vec(&tools_list_jsonrpc)?;
 
     let mut req = Request::new(Full::new(Bytes::from(tools_list_body)));
     *req.method_mut() = http::Method::POST;
@@ -448,7 +454,7 @@ where
                 request: call_request,
             };
 
-            let json = serde_json::to_string(&call_jsonrpc).unwrap_or_else(|e| {
+            let json = serde_json::to_vec(&call_jsonrpc).unwrap_or_else(|e| {
                 fatal!(
                     3,
                     "failed to serialize tools/call request for {}: {e}",
@@ -563,7 +569,7 @@ pub async fn mcp_sse_initialize(uri: &str) -> McpSetup {
         request: init_request,
     };
 
-    let init_body = serde_json::to_string(&init_jsonrpc)
+    let init_body = serde_json::to_vec(&init_jsonrpc)
         .unwrap_or_else(|e| fatal!(3, "failed to serialize initialize request: {e}"));
 
     // Send the initialize request via POST
@@ -622,7 +628,7 @@ pub async fn mcp_sse_initialize(uri: &str) -> McpSetup {
         notification: initialized_notif,
     };
 
-    let initialized_body = serde_json::to_string(&notif_jsonrpc)
+    let initialized_body = serde_json::to_vec(&notif_jsonrpc)
         .unwrap_or_else(|e| fatal!(3, "failed to serialize initialized notification: {e}"));
 
     let _ = client
@@ -642,7 +648,7 @@ pub async fn mcp_sse_initialize(uri: &str) -> McpSetup {
         request: tools_list_request,
     };
 
-    let tools_list_body = serde_json::to_string(&tools_list_jsonrpc)
+    let tools_list_body = serde_json::to_vec(&tools_list_jsonrpc)
         .unwrap_or_else(|e| fatal!(3, "failed to serialize tools/list request: {e}"));
 
     // Send the request via POST
@@ -695,7 +701,7 @@ pub async fn mcp_sse_initialize(uri: &str) -> McpSetup {
                             };
 
                             let roots_body =
-                                serde_json::to_string(&roots_response).unwrap_or_else(|e| {
+                                serde_json::to_vec(&roots_response).unwrap_or_else(|e| {
                                     fatal!(3, "failed to serialize roots/list response: {e}")
                                 });
 
@@ -756,7 +762,7 @@ pub async fn mcp_sse_initialize(uri: &str) -> McpSetup {
                 request: call_request,
             };
 
-            let json = serde_json::to_string(&call_jsonrpc).unwrap_or_else(|e| {
+            let json = serde_json::to_vec(&call_jsonrpc).unwrap_or_else(|e| {
                 fatal!(
                     3,
                     "failed to serialize tools/call request for {}: {e}",
