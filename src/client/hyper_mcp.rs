@@ -8,28 +8,31 @@ use std::time::Instant;
 use bytes::Bytes;
 use futures_util::StreamExt;
 use http::{Request, StatusCode};
+
 use rmcp::serde_json;
 
 use rmcp::model::{
-    CallToolRequest, CallToolRequestParam, ClientCapabilities, Implementation,
-    InitializeRequest, InitializeRequestParam, InitializeResult, InitializedNotification,
-    JsonRpcRequest, JsonRpcResponse, ListToolsRequest, ListToolsResult, ListRootsResult,
-    NumberOrString, ProtocolVersion,
+    CallToolRequest, CallToolRequestParam, ClientCapabilities, Implementation, InitializeRequest,
+    InitializeRequestParam, InitializeResult, InitializedNotification, JsonRpcRequest,
+    JsonRpcResponse, ListRootsResult, ListToolsRequest, ListToolsResult, NumberOrString,
+    ProtocolVersion,
 };
 
 use crate::client::utils::*;
 use crate::fatal;
-use http_body_util::{BodyExt, Either, Full};
+use http_body_util::{BodyExt, Full};
 
 /// Result of MCP initialization: URI for requests and pre-compiled bodies for each tool
 #[derive(Debug, Default)]
 pub struct McpSetup {
-    /// URI where to send MCP requests (obtained from SSE handshake)
+    /// URI where to send MCP requests (obtained from SSE handshake or original URI for Streamable HTTP)
     pub uri: hyper::Uri,
     /// Pre-compiled JSON bodies to invoke each tool with tools/call
     pub tool_bodies: Vec<Bytes>,
-    /// Task that keeps the SSE connection open
+    /// Task that keeps the SSE connection open (only for SSE transport)
     pub sse_task: Option<tokio::task::JoinHandle<()>>,
+    /// Session ID for Streamable HTTP transport (from Mcp-Session-Id header)
+    pub session_id: Option<String>,
 }
 
 pub async fn http_hyper_mcp(
@@ -63,9 +66,10 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
         get_conn_address(&opts, &uri).unwrap_or_else(|| fatal!(1, "no host specified in uri"));
     let mut endpoint = build_conn_endpoint(&host, port);
 
+    // For SSE transport, initialize before connection loop (uses reqwest internally)
     let mut mcp = McpSetup::default();
-    if opts.sse_mcp {
-        mcp = mcp_initialize(uri_str).await;
+    if opts.mcp_sse {
+        mcp = mcp_sse_initialize(uri_str).await;
         uri = mcp.uri;
 
         if opts.host.is_none() {
@@ -83,17 +87,15 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
         .unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
 
     // MCP requires Content-Type: application/json for JSON-RPC requests
-    if opts.sse_mcp {
-        headers.insert(
-            http::header::CONTENT_TYPE,
-            http::header::HeaderValue::from_static("application/json"),
-        );
-    }
-
-    let trailers = build_trailers(opts.as_ref())
-        .unwrap_or_else(|e| fatal!(2, "could not build trailers: {e}"));
-
-    let bodies: Vec<Full<Bytes>> = mcp.tool_bodies.clone().into_iter().map(|b| Full::new(b)).collect();
+    // Accept header must include both application/json and text/event-stream for Streamable HTTP
+    headers.insert(
+        http::header::CONTENT_TYPE,
+        http::header::HeaderValue::from_static("application/json"),
+    );
+    headers.insert(
+        http::header::ACCEPT,
+        http::header::HeaderValue::from_static("application/json, text/event-stream"),
+    );
 
     let start = Instant::now();
     'connection: loop {
@@ -104,10 +106,9 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
         if cid < opts.uri.len() && !banner.contains(uri_str) {
             banner.insert(uri_str.to_owned());
             println!(
-                "hyper [{tid:>2}] -> connecting to {}:{}, method = {} uri = {} {}...",
+                "hyper-mcp [{tid:>2}] -> connecting to {}:{}, method = POST uri = {} {}...",
                 host,
                 port,
-                opts.method.as_ref().unwrap_or(&http::Method::GET),
                 uri,
                 B::SCHEME
             );
@@ -124,27 +125,37 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
 
         statistics.inc_conn();
 
+        // For Streamable HTTP transport, initialize after connection is established
+        if !opts.mcp_sse && mcp.tool_bodies.is_empty() {
+            match mcp_streamable_http_initialize(&uri, &headers, &mut sender).await {
+                Ok(setup) => {
+                    mcp = setup;
+                    // Add session ID to headers for subsequent requests
+                    if let Some(ref session_id) = mcp.session_id {
+                        headers.insert(
+                            http::header::HeaderName::from_static("mcp-session-id"),
+                            http::header::HeaderValue::from_str(session_id)
+                                .unwrap_or_else(|e| fatal!(3, "invalid session id: {e}")),
+                        );
+                    }
+                }
+                Err(e) => {
+                    fatal!(3, "MCP Streamable HTTP initialization failed: {e}");
+                }
+            }
+        }
+
+        let bodies: Vec<Full<Bytes>> = mcp.tool_bodies.clone().into_iter().map(Full::new).collect();
+
         loop {
             let body = bodies
                 .get(total as usize % bodies.len())
                 .cloned()
                 .unwrap_or_else(|| Full::new(Bytes::from("")));
 
-            let body = match &trailers {
-                None => Either::Left(body.clone()),
-                tr => {
-                    let trailers = tr.clone().map(Result::Ok);
-                    Either::Right(body.clone().with_trailers(std::future::ready(trailers)))
-                }
-            };
-
             let mut req = Request::new(body);
             // MCP JSON-RPC requests must use POST method
-            *req.method_mut() = if opts.sse_mcp {
-                http::Method::POST
-            } else {
-                opts.method.clone().unwrap_or(http::Method::GET)
-            };
+            *req.method_mut() = http::Method::POST;
             *req.uri_mut() = uri.clone();
             *req.headers_mut() = headers.clone();
 
@@ -153,6 +164,7 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
             match sender.send_request(req).await {
                 Ok(res) => match discard_body(res).await {
                     Ok(StatusCode::OK) => statistics.inc_ok(rt_stats),
+                    Ok(StatusCode::ACCEPTED) => statistics.inc_ok(rt_stats),
                     Ok(code) => statistics.set_http_status(code, rt_stats),
                     Err(ref err) => {
                         statistics.set_error(err.as_ref(), rt_stats);
@@ -201,6 +213,273 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
     statistics
 }
 
+/// Initialize MCP connection via Streamable HTTP transport using hyper sender.
+///
+/// 1. Sends MCP `initialize` request and extracts `Mcp-Session-Id` from response header
+/// 2. Sends `notifications/initialized` notification
+/// 3. Sends `tools/list` request to get available tools
+/// 4. Pre-compiles JSON-RPC bodies for each tool's `tools/call` invocation
+async fn mcp_streamable_http_initialize<S>(
+    uri: &hyper::Uri,
+    base_headers: &http::HeaderMap,
+    sender: &mut S,
+) -> Result<McpSetup, Box<dyn std::error::Error + Send + Sync>>
+where
+    S: RequestSender<Full<Bytes>>,
+{
+    // Step 1: Send MCP initialize request
+    let init_params = InitializeRequestParam {
+        protocol_version: ProtocolVersion::LATEST,
+        capabilities: ClientCapabilities::builder().enable_roots().build(),
+        client_info: Implementation {
+            name: "plumbrs".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            ..Default::default()
+        },
+    };
+
+    let init_request = InitializeRequest::new(init_params);
+
+    let init_jsonrpc = JsonRpcRequest {
+        jsonrpc: Default::default(),
+        id: NumberOrString::Number(1),
+        request: init_request,
+    };
+
+    let init_body = serde_json::to_string(&init_jsonrpc)?;
+
+    let mut req = Request::new(Full::new(Bytes::from(init_body)));
+    *req.method_mut() = http::Method::POST;
+    *req.uri_mut() = uri.clone();
+    *req.headers_mut() = base_headers.clone();
+
+    let response = sender
+        .send_request(req)
+        .await
+        .map_err(|e| format!("initialize request failed: {e}"))?;
+
+    // Extract session ID from response headers
+    let session_id = response
+        .headers()
+        .get("mcp-session-id")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
+    if response.status() != StatusCode::OK {
+        return Err(format!(
+            "initialize request failed with status: {}",
+            response.status()
+        )
+        .into());
+    }
+
+    // Check content-type to determine how to parse response
+    let content_type = response
+        .headers()
+        .get(http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/json")
+        .to_string();
+
+    // Read response body
+    let body_bytes = response
+        .into_body()
+        .collect()
+        .await
+        .map_err(|e| format!("failed to read initialize response body: {e}"))?
+        .to_bytes();
+
+    // Parse JSON - either directly or from SSE data field
+    let json_body = if content_type.contains("text/event-stream") {
+        // Parse SSE format: extract JSON from "data:" line
+        let body_str = String::from_utf8_lossy(&body_bytes);
+        extract_sse_data(&body_str)?
+    } else {
+        String::from_utf8_lossy(&body_bytes).to_string()
+    };
+
+    let _init_result: JsonRpcResponse<InitializeResult> = serde_json::from_str(&json_body)
+        .map_err(|e| format!("failed to parse initialize response: {e}"))?;
+
+    eprintln!(
+        "MCP Streamable HTTP: initialized successfully, session_id={:?}",
+        session_id
+    );
+
+    // Build headers with session ID for subsequent requests
+    let mut headers_with_session = base_headers.clone();
+    if let Some(ref sid) = session_id {
+        headers_with_session.insert(
+            http::header::HeaderName::from_static("mcp-session-id"),
+            http::header::HeaderValue::from_str(sid)?,
+        );
+    }
+
+    // Step 2: Send initialized notification
+    let initialized_notif = InitializedNotification::default();
+
+    let notif_jsonrpc = rmcp::model::JsonRpcNotification {
+        jsonrpc: Default::default(),
+        notification: initialized_notif,
+    };
+
+    let initialized_body = serde_json::to_string(&notif_jsonrpc)?;
+
+    let mut req = Request::new(Full::new(Bytes::from(initialized_body)));
+    *req.method_mut() = http::Method::POST;
+    *req.uri_mut() = uri.clone();
+    *req.headers_mut() = headers_with_session.clone();
+
+    // Wait for sender to be ready
+    sender
+        .ready()
+        .await
+        .map_err(|e| format!("sender not ready: {e}"))?;
+
+    let response = sender
+        .send_request(req)
+        .await
+        .map_err(|e| format!("initialized notification failed: {e}"))?;
+
+    // Notification may return 200 OK, 202 Accepted, or 204 No Content
+    if response.status() != StatusCode::OK
+        && response.status() != StatusCode::ACCEPTED
+        && response.status() != StatusCode::NO_CONTENT
+    {
+        return Err(format!(
+            "initialized notification failed with status: {}",
+            response.status()
+        )
+        .into());
+    }
+
+    // Consume the response body
+    let _ = response.into_body().collect().await;
+
+    // Step 3: Send tools/list request
+    let tools_list_request = ListToolsRequest::default();
+
+    let tools_list_jsonrpc = JsonRpcRequest {
+        jsonrpc: Default::default(),
+        id: NumberOrString::Number(2),
+        request: tools_list_request,
+    };
+
+    let tools_list_body = serde_json::to_string(&tools_list_jsonrpc)?;
+
+    let mut req = Request::new(Full::new(Bytes::from(tools_list_body)));
+    *req.method_mut() = http::Method::POST;
+    *req.uri_mut() = uri.clone();
+    *req.headers_mut() = headers_with_session.clone();
+
+    // Wait for sender to be ready
+    sender
+        .ready()
+        .await
+        .map_err(|e| format!("sender not ready: {e}"))?;
+
+    let response = sender
+        .send_request(req)
+        .await
+        .map_err(|e| format!("tools/list request failed: {e}"))?;
+
+    if response.status() != StatusCode::OK {
+        return Err(format!(
+            "tools/list request failed with status: {}",
+            response.status()
+        )
+        .into());
+    }
+
+    // Check content-type to determine how to parse response
+    let content_type = response
+        .headers()
+        .get(http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/json")
+        .to_string();
+
+    // Read and parse tools/list response
+    let body_bytes = response
+        .into_body()
+        .collect()
+        .await
+        .map_err(|e| format!("failed to read tools/list response body: {e}"))?
+        .to_bytes();
+
+    // Parse JSON - either directly or from SSE data field
+    let json_body = if content_type.contains("text/event-stream") {
+        let body_str = String::from_utf8_lossy(&body_bytes);
+        extract_sse_data(&body_str)?
+    } else {
+        String::from_utf8_lossy(&body_bytes).to_string()
+    };
+
+    let tools_result: JsonRpcResponse<ListToolsResult> = serde_json::from_str(&json_body)
+        .map_err(|e| format!("failed to parse tools/list response: {e}"))?;
+
+    let tools = &tools_result.result.tools;
+
+    if tools.is_empty() {
+        return Err("no tools available from MCP server".into());
+    }
+
+    eprintln!(
+        "MCP Streamable HTTP: found {} tools: {:?}",
+        tools.len(),
+        tools.iter().map(|t| t.name.as_ref()).collect::<Vec<_>>()
+    );
+
+    // Step 4: Pre-compile JSON bodies for each tool's tools/call invocation
+    let tool_bodies: Vec<Bytes> = tools
+        .iter()
+        .enumerate()
+        .map(|(idx, tool)| {
+            let call_params = CallToolRequestParam {
+                name: tool.name.clone(),
+                arguments: None,
+            };
+
+            let call_request = CallToolRequest::new(call_params);
+
+            let call_jsonrpc = JsonRpcRequest {
+                jsonrpc: Default::default(),
+                id: NumberOrString::Number((idx + 100) as i64),
+                request: call_request,
+            };
+
+            let json = serde_json::to_string(&call_jsonrpc).unwrap_or_else(|e| {
+                fatal!(
+                    3,
+                    "failed to serialize tools/call request for {}: {e}",
+                    tool.name
+                )
+            });
+            Bytes::from(json)
+        })
+        .collect();
+
+    Ok(McpSetup {
+        uri: uri.clone(),
+        tool_bodies,
+        sse_task: None,
+        session_id,
+    })
+}
+
+/// Extract JSON data from SSE format response
+fn extract_sse_data(body: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    for line in body.lines() {
+        if let Some(data) = line.strip_prefix("data:") {
+            let json = data.trim();
+            if !json.is_empty() {
+                return Ok(json.to_string());
+            }
+        }
+    }
+    Err("no data field found in SSE response".into())
+}
+
 /// Initialize MCP connection via SSE handshake, fetch available tools,
 /// and prepare pre-compiled JSON bodies for tools/call requests.
 ///
@@ -209,14 +488,14 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
 /// 3. Sends `notifications/initialized` notification
 /// 4. Sends `tools/list` request to get available tools
 /// 5. Pre-compiles JSON-RPC bodies for each tool's `tools/call` invocation
-pub async fn mcp_initialize(uri: &str) -> McpSetup {
+pub async fn mcp_sse_initialize(uri: &str) -> McpSetup {
     let client = reqwest::Client::new();
 
     // Step 1: SSE handshake to get the message endpoint
     let response = client
         .get(uri)
-        .header("Accept", "text/event-stream")
-        .header("Cache-Control", "no-cache")
+        .header(http::header::ACCEPT, "text/event-stream")
+        .header(http::header::CACHE_CONTROL, "no-cache")
         .send()
         .await
         .unwrap_or_else(|e| fatal!(3, "SSE handshake request failed: {e}"));
@@ -268,9 +547,7 @@ pub async fn mcp_initialize(uri: &str) -> McpSetup {
     // Step 2: Send MCP initialize request
     let init_params = InitializeRequestParam {
         protocol_version: ProtocolVersion::LATEST,
-        capabilities: ClientCapabilities::builder()
-            .enable_roots()
-            .build(),
+        capabilities: ClientCapabilities::builder().enable_roots().build(),
         client_info: Implementation {
             name: "plumbrs".to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
@@ -292,7 +569,7 @@ pub async fn mcp_initialize(uri: &str) -> McpSetup {
     // Send the initialize request via POST
     let _ = client
         .post(new_uri.to_string())
-        .header("Content-Type", "application/json")
+        .header(http::header::CONTENT_TYPE, "application/json")
         .body(init_body)
         .send()
         .await
@@ -303,8 +580,12 @@ pub async fn mcp_initialize(uri: &str) -> McpSetup {
     let mut init_response_body = String::new();
 
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk
-            .unwrap_or_else(|e| fatal!(3, "SSE read error while waiting for initialize response: {e}"));
+        let chunk = chunk.unwrap_or_else(|e| {
+            fatal!(
+                3,
+                "SSE read error while waiting for initialize response: {e}"
+            )
+        });
         buffer.push_str(&String::from_utf8_lossy(&chunk));
 
         while let Some(idx) = buffer.find('\n') {
@@ -325,9 +606,8 @@ pub async fn mcp_initialize(uri: &str) -> McpSetup {
         fatal!(3, "no response received for initialize on SSE stream");
     }
 
-    let init_result: JsonRpcResponse<InitializeResult> =
-        serde_json::from_str(&init_response_body)
-            .unwrap_or_else(|e| fatal!(3, "failed to parse initialize response: {e}"));
+    let init_result: JsonRpcResponse<InitializeResult> = serde_json::from_str(&init_response_body)
+        .unwrap_or_else(|e| fatal!(3, "failed to parse initialize response: {e}"));
 
     // JsonRpcResponse doesn't have error field - check if result is valid
     let _ = init_result.result;
@@ -347,7 +627,7 @@ pub async fn mcp_initialize(uri: &str) -> McpSetup {
 
     let _ = client
         .post(new_uri.to_string())
-        .header("Content-Type", "application/json")
+        .header(http::header::CONTENT_TYPE, "application/json")
         .body(initialized_body)
         .send()
         .await
@@ -368,7 +648,7 @@ pub async fn mcp_initialize(uri: &str) -> McpSetup {
     // Send the request via POST
     let _ = client
         .post(new_uri.to_string())
-        .header("Content-Type", "application/json")
+        .header(http::header::CONTENT_TYPE, "application/json")
         .body(tools_list_body)
         .send()
         .await
@@ -379,8 +659,12 @@ pub async fn mcp_initialize(uri: &str) -> McpSetup {
     let mut tools_response_body = String::new();
 
     'sse_read: while let Some(chunk) = stream.next().await {
-        let chunk =
-            chunk.unwrap_or_else(|e| fatal!(3, "SSE read error while waiting for tools/list response: {e}"));
+        let chunk = chunk.unwrap_or_else(|e| {
+            fatal!(
+                3,
+                "SSE read error while waiting for tools/list response: {e}"
+            )
+        });
         buffer.push_str(&String::from_utf8_lossy(&chunk));
 
         while let Some(idx) = buffer.find('\n') {
@@ -400,18 +684,24 @@ pub async fn mcp_initialize(uri: &str) -> McpSetup {
                             let roots_result = ListRootsResult { roots: vec![] };
                             let roots_response = JsonRpcResponse {
                                 jsonrpc: Default::default(),
-                                id: req_id.as_i64().map(NumberOrString::Number)
-                                    .or_else(|| req_id.as_str().map(|s| NumberOrString::String(s.into())))
+                                id: req_id
+                                    .as_i64()
+                                    .map(NumberOrString::Number)
+                                    .or_else(|| {
+                                        req_id.as_str().map(|s| NumberOrString::String(s.into()))
+                                    })
                                     .unwrap_or(NumberOrString::Number(0)),
                                 result: roots_result,
                             };
 
-                            let roots_body = serde_json::to_string(&roots_response)
-                                .unwrap_or_else(|e| fatal!(3, "failed to serialize roots/list response: {e}"));
+                            let roots_body =
+                                serde_json::to_string(&roots_response).unwrap_or_else(|e| {
+                                    fatal!(3, "failed to serialize roots/list response: {e}")
+                                });
 
                             let _ = client
                                 .post(new_uri.to_string())
-                                .header("Content-Type", "application/json")
+                                .header(http::header::CONTENT_TYPE, "application/json")
                                 .body(roots_body)
                                 .send()
                                 .await
@@ -433,9 +723,8 @@ pub async fn mcp_initialize(uri: &str) -> McpSetup {
         fatal!(3, "no response received for tools/list on SSE stream");
     }
 
-    let tools_result: JsonRpcResponse<ListToolsResult> =
-        serde_json::from_str(&tools_response_body)
-            .unwrap_or_else(|e| fatal!(3, "failed to parse tools/list response: {e}"));
+    let tools_result: JsonRpcResponse<ListToolsResult> = serde_json::from_str(&tools_response_body)
+        .unwrap_or_else(|e| fatal!(3, "failed to parse tools/list response: {e}"));
 
     let tools = &tools_result.result.tools;
 
@@ -488,13 +777,10 @@ pub async fn mcp_initialize(uri: &str) -> McpSetup {
         eprintln!("SSE: connection closed.");
     });
 
-    let res = McpSetup {
+    McpSetup {
         uri: new_uri,
         tool_bodies,
         sse_task: Some(sse_task),
-    };
-
-    println!("Using {:#?}", res);
-
-    res
+        session_id: None,
+    }
 }

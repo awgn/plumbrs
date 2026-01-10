@@ -1,10 +1,10 @@
 pub mod hyper;
 pub mod hyper_h2;
 pub mod hyper_legacy;
-pub mod hyper_multichunk;
-pub mod hyper_rt1;
 #[cfg(feature = "mcp")]
 pub mod hyper_mcp;
+pub mod hyper_multichunk;
+pub mod hyper_rt1;
 #[cfg(all(target_os = "linux", feature = "io_uring"))]
 pub mod io_uring;
 pub mod reqwest;

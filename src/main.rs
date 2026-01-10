@@ -49,11 +49,10 @@ fn check_options(opts: &mut Options) -> Result<()> {
 
     #[cfg(feature = "mcp")]
     if !matches!(opts.client_type, ClientType::Auto)
-        && !matches!(opts.client_type, ClientType::Hyper)
         && !matches!(opts.client_type, ClientType::HyperMcp)
-        && opts.sse_mcp
+        && (opts.mcp || opts.mcp_sse)
     {
-        return Err(anyhow!("SSE not supported with this client!"));
+        return Err(anyhow!("MCP not supported with this client!"));
     }
 
     match opts.client_type {

@@ -162,12 +162,21 @@ pub struct Options {
     pub http1_ignore_invalid_headers_in_responses: bool,
     #[arg(help = "Set whether HTTP/0.9 responses should be tolerated.", long)]
     pub http09_responses: bool,
+    #[cfg(feature = "mcp")]
     #[arg(
-        help = "Force Server-Sent Events (SSE) transport for hyper-mcp.",
-        long = "sse-mcp",
+        help = "Enable MCP (Model Context Protocol) mode with Streamable HTTP transport.",
+        long = "mcp",
         default_value_t = false
     )]
-    pub sse_mcp: bool,
+    pub mcp: bool,
+
+    #[cfg(feature = "mcp")]
+    #[arg(
+        help = "Force legacy Server-Sent Events (SSE) transport for MCP (implies --mcp).",
+        long = "mcp-sse",
+        default_value_t = false
+    )]
+    pub mcp_sse: bool,
 
     #[cfg(all(target_os = "linux", feature = "io_uring"))]
     #[arg(
