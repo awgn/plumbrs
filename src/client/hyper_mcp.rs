@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use bytes::Bytes;
-use futures_util::StreamExt;
+
 use http::{Request, StatusCode};
 
 use rmcp::serde_json;
@@ -20,7 +20,15 @@ use rmcp::model::{
 
 use crate::client::utils::*;
 use crate::fatal;
+use const_format::concatcp;
 use http_body_util::{BodyExt, Full};
+
+/// MIME type for JSON content
+const MIME_APPLICATION_JSON: &str = "application/json";
+/// MIME type for Server-Sent Events stream
+const MIME_TEXT_EVENT_STREAM: &str = "text/event-stream";
+/// Combined MIME types for Accept header (JSON and SSE)
+const MIME_ACCEPT_JSON_SSE: &str = concatcp!(MIME_APPLICATION_JSON, ", ", MIME_TEXT_EVENT_STREAM);
 
 /// Result of MCP initialization: URI for requests and pre-compiled bodies for each tool
 #[derive(Debug, Default)]
@@ -69,7 +77,7 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
     // For SSE transport, initialize before connection loop
     let mut mcp = McpSetup::default();
     if opts.mcp_sse {
-        mcp = mcp_sse_initialize(uri_str).await;
+        mcp = mcp_sse_initialize::<B>(&uri_str, opts.as_ref()).await;
         uri = mcp.uri;
 
         if opts.host.is_none() {
@@ -90,11 +98,11 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
     // Accept header must include both application/json and text/event-stream for Streamable HTTP
     headers.insert(
         http::header::CONTENT_TYPE,
-        http::header::HeaderValue::from_static("application/json"),
+        http::header::HeaderValue::from_static(MIME_APPLICATION_JSON),
     );
     headers.insert(
         http::header::ACCEPT,
-        http::header::HeaderValue::from_static("application/json, text/event-stream"),
+        http::header::HeaderValue::from_static(MIME_ACCEPT_JSON_SSE),
     );
 
     let transport = if opts.mcp_sse {
@@ -284,7 +292,7 @@ where
         .headers()
         .get(http::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("application/json")
+        .unwrap_or(MIME_APPLICATION_JSON)
         .to_string();
 
     // Read response body
@@ -296,7 +304,7 @@ where
         .to_bytes();
 
     // Parse JSON - either directly or from SSE data field
-    let json_body = if content_type.contains("text/event-stream") {
+    let json_body = if content_type.contains(MIME_TEXT_EVENT_STREAM) {
         // Parse SSE format: extract JSON from "data:" line
         let body_str = String::from_utf8_lossy(&body_bytes);
         extract_sse_data(&body_str)?
@@ -402,7 +410,7 @@ where
         .headers()
         .get(http::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("application/json")
+        .unwrap_or(MIME_APPLICATION_JSON)
         .to_string();
 
     // Read and parse tools/list response
@@ -414,7 +422,7 @@ where
         .to_bytes();
 
     // Parse JSON - either directly or from SSE data field
-    let json_body = if content_type.contains("text/event-stream") {
+    let json_body = if content_type.contains(MIME_TEXT_EVENT_STREAM) {
         let body_str = String::from_utf8_lossy(&body_bytes);
         extract_sse_data(&body_str)?
     } else {
@@ -494,47 +502,73 @@ fn extract_sse_data(body: &str) -> Result<String, Box<dyn std::error::Error + Se
 /// 3. Sends `notifications/initialized` notification
 /// 4. Sends `tools/list` request to get available tools
 /// 5. Pre-compiles JSON-RPC bodies for each tool's `tools/call` invocation
-pub async fn mcp_sse_initialize(uri: &str) -> McpSetup {
-    let client = reqwest::Client::new();
+pub async fn mcp_sse_initialize<B: HttpConnectionBuilder>(uri: &str, opts: &Options) -> McpSetup {
+    use crate::stats::{RealtimeStats, Statistics};
+
+    let base_uri: hyper::Uri = uri
+        .parse()
+        .unwrap_or_else(|e| fatal!(3, "invalid base uri: {e}"));
+
+    let host = base_uri
+        .host()
+        .unwrap_or_else(|| fatal!(3, "no host in uri"))
+        .to_owned();
+    let port = base_uri.port_u16().unwrap_or(80);
+    let endpoint: &'static str = build_conn_endpoint(&host, port);
+
+    // Create dummy stats for connection building
+    let mut stats = Statistics::new(false);
+    let rt_stats = RealtimeStats::default();
 
     // Step 1: SSE handshake to get the message endpoint
-    let response = client
-        .get(uri)
-        .header(http::header::ACCEPT, "text/event-stream")
+    // Build connection for SSE GET request
+    let (mut sse_sender, sse_conn_task) =
+        B::build_connection::<Full<Bytes>>(endpoint, &mut stats, &rt_stats, opts)
+            .await
+            .unwrap_or_else(|| fatal!(3, "SSE connection failed"));
+
+    // Build SSE GET request
+    let sse_req = Request::builder()
+        .method(http::Method::GET)
+        .uri(base_uri.clone())
+        .header(http::header::HOST, format!("{}:{}", host, port))
+        .header(http::header::ACCEPT, MIME_TEXT_EVENT_STREAM)
         .header(http::header::CACHE_CONTROL, "no-cache")
-        .send()
+        .body(Full::new(Bytes::new()))
+        .unwrap_or_else(|e| fatal!(3, "failed to build SSE request: {e}"));
+
+    let sse_response = sse_sender
+        .send_request(sse_req)
         .await
         .unwrap_or_else(|e| fatal!(3, "SSE handshake request failed: {e}"));
 
-    let mut stream = response.bytes_stream();
+    let mut sse_body = sse_response.into_body();
     let mut buffer = String::new();
     let mut new_path = String::new();
 
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.unwrap_or_else(|e| fatal!(3, "SSE handshake body error: {e}"));
-        buffer.push_str(&String::from_utf8_lossy(&chunk));
+    while let Some(frame) = sse_body.frame().await {
+        let frame = frame.unwrap_or_else(|e| fatal!(3, "SSE handshake body error: {e}"));
+        if let Some(chunk) = frame.data_ref() {
+            buffer.push_str(&String::from_utf8_lossy(chunk));
 
-        while let Some(idx) = buffer.find('\n') {
-            let line: String = buffer.drain(..=idx).collect();
-            let line = line.trim();
-            if let Some(rest) = line.strip_prefix("data:") {
-                new_path = rest.trim().to_string();
+            while let Some(idx) = buffer.find('\n') {
+                let line: String = buffer.drain(..=idx).collect();
+                let line = line.trim();
+                if let Some(rest) = line.strip_prefix("data:") {
+                    new_path = rest.trim().to_string();
+                    break;
+                }
+            }
+
+            if !new_path.is_empty() {
                 break;
             }
-        }
-
-        if !new_path.is_empty() {
-            break;
         }
     }
 
     if new_path.is_empty() {
         fatal!(3, "could not find endpoint in SSE handshake");
     }
-
-    let base_uri: hyper::Uri = uri
-        .parse()
-        .unwrap_or_else(|e| fatal!(3, "invalid base uri: {e}"));
 
     let new_uri = if new_path.starts_with("http://") || new_path.starts_with("https://") {
         new_path
@@ -549,6 +583,36 @@ pub async fn mcp_sse_initialize(uri: &str) -> McpSetup {
         );
         hyper::Uri::from_parts(parts).unwrap_or_else(|e| fatal!(3, "invalid new uri: {e}"))
     };
+
+    // Helper function to send POST request
+    async fn send_post(
+        endpoint: &'static str,
+        uri: &hyper::Uri,
+        host: &str,
+        port: u16,
+        body: Vec<u8>,
+        stats: &mut Statistics,
+        rt_stats: &RealtimeStats,
+        opts: &crate::Options,
+    ) -> http::Response<hyper::body::Incoming> {
+        let (mut sender, _conn_task) =
+            Http1::build_connection::<Full<Bytes>>(endpoint, stats, rt_stats, opts)
+                .await
+                .unwrap_or_else(|| fatal!(3, "POST connection failed"));
+
+        let req = Request::builder()
+            .method(http::Method::POST)
+            .uri(uri.clone())
+            .header(http::header::HOST, format!("{}:{}", host, port))
+            .header(http::header::CONTENT_TYPE, MIME_APPLICATION_JSON)
+            .body(Full::new(Bytes::from(body)))
+            .unwrap_or_else(|e| fatal!(3, "failed to build POST request: {e}"));
+
+        sender
+            .send_request(req)
+            .await
+            .unwrap_or_else(|e| fatal!(3, "POST request failed: {e}"))
+    }
 
     // Step 2: Send MCP initialize request
     let init_params = InitializeRequestParam {
@@ -573,38 +637,37 @@ pub async fn mcp_sse_initialize(uri: &str) -> McpSetup {
         .unwrap_or_else(|e| fatal!(3, "failed to serialize initialize request: {e}"));
 
     // Send the initialize request via POST
-    let _ = client
-        .post(new_uri.to_string())
-        .header(http::header::CONTENT_TYPE, "application/json")
-        .body(init_body)
-        .send()
-        .await
-        .unwrap_or_else(|e| fatal!(3, "initialize request failed: {e}"));
+    let _ = send_post(
+        endpoint, &new_uri, &host, port, init_body, &mut stats, &rt_stats, &opts,
+    )
+    .await;
 
     // Read the initialize response from the SSE stream
     buffer.clear();
     let mut init_response_body = String::new();
 
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.unwrap_or_else(|e| {
+    while let Some(frame) = sse_body.frame().await {
+        let frame = frame.unwrap_or_else(|e| {
             fatal!(
                 3,
                 "SSE read error while waiting for initialize response: {e}"
             )
         });
-        buffer.push_str(&String::from_utf8_lossy(&chunk));
+        if let Some(chunk) = frame.data_ref() {
+            buffer.push_str(&String::from_utf8_lossy(chunk));
 
-        while let Some(idx) = buffer.find('\n') {
-            let line: String = buffer.drain(..=idx).collect();
-            let line = line.trim();
-            if let Some(rest) = line.strip_prefix("data:") {
-                init_response_body = rest.trim().to_string();
+            while let Some(idx) = buffer.find('\n') {
+                let line: String = buffer.drain(..=idx).collect();
+                let line = line.trim();
+                if let Some(rest) = line.strip_prefix("data:") {
+                    init_response_body = rest.trim().to_string();
+                    break;
+                }
+            }
+
+            if !init_response_body.is_empty() {
                 break;
             }
-        }
-
-        if !init_response_body.is_empty() {
-            break;
         }
     }
 
@@ -631,13 +694,17 @@ pub async fn mcp_sse_initialize(uri: &str) -> McpSetup {
     let initialized_body = serde_json::to_vec(&notif_jsonrpc)
         .unwrap_or_else(|e| fatal!(3, "failed to serialize initialized notification: {e}"));
 
-    let _ = client
-        .post(new_uri.to_string())
-        .header(http::header::CONTENT_TYPE, "application/json")
-        .body(initialized_body)
-        .send()
-        .await
-        .unwrap_or_else(|e| fatal!(3, "initialized notification failed: {e}"));
+    let _ = send_post(
+        endpoint,
+        &new_uri,
+        &host,
+        port,
+        initialized_body,
+        &mut stats,
+        &rt_stats,
+        &opts,
+    )
+    .await;
 
     // Step 4: Send tools/list request
     let tools_list_request = ListToolsRequest::default();
@@ -652,75 +719,85 @@ pub async fn mcp_sse_initialize(uri: &str) -> McpSetup {
         .unwrap_or_else(|e| fatal!(3, "failed to serialize tools/list request: {e}"));
 
     // Send the request via POST
-    let _ = client
-        .post(new_uri.to_string())
-        .header(http::header::CONTENT_TYPE, "application/json")
-        .body(tools_list_body)
-        .send()
-        .await
-        .unwrap_or_else(|e| fatal!(3, "tools/list request failed: {e}"));
+    let _ = send_post(
+        endpoint,
+        &new_uri,
+        &host,
+        port,
+        tools_list_body,
+        &mut stats,
+        &rt_stats,
+        &opts,
+    )
+    .await;
 
     // Read the response from the SSE stream, handling any server requests (like roots/list)
     buffer.clear();
     let mut tools_response_body = String::new();
 
-    'sse_read: while let Some(chunk) = stream.next().await {
-        let chunk = chunk.unwrap_or_else(|e| {
+    'sse_read: while let Some(frame) = sse_body.frame().await {
+        let frame = frame.unwrap_or_else(|e| {
             fatal!(
                 3,
                 "SSE read error while waiting for tools/list response: {e}"
             )
         });
-        buffer.push_str(&String::from_utf8_lossy(&chunk));
+        if let Some(chunk) = frame.data_ref() {
+            buffer.push_str(&String::from_utf8_lossy(chunk));
 
-        while let Some(idx) = buffer.find('\n') {
-            let line: String = buffer.drain(..=idx).collect();
-            let line = line.trim();
-            if let Some(rest) = line.strip_prefix("data:") {
-                let data = rest.trim();
+            while let Some(idx) = buffer.find('\n') {
+                let line: String = buffer.drain(..=idx).collect();
+                let line = line.trim();
+                if let Some(rest) = line.strip_prefix("data:") {
+                    let data = rest.trim();
 
-                // Check if this is a server request (has "method" and "id")
-                if let Ok(server_req) = serde_json::from_str::<serde_json::Value>(data) {
-                    if server_req.get("method").is_some() && server_req.get("id").is_some() {
-                        let method = server_req["method"].as_str().unwrap_or("");
-                        let req_id = &server_req["id"];
+                    // Check if this is a server request (has "method" and "id")
+                    if let Ok(server_req) = serde_json::from_str::<serde_json::Value>(data) {
+                        if server_req.get("method").is_some() && server_req.get("id").is_some() {
+                            let method = server_req["method"].as_str().unwrap_or("");
+                            let req_id = &server_req["id"];
 
-                        // Handle roots/list request from server
-                        if method == "roots/list" {
-                            let roots_result = ListRootsResult { roots: vec![] };
-                            let roots_response = JsonRpcResponse {
-                                jsonrpc: Default::default(),
-                                id: req_id
-                                    .as_i64()
-                                    .map(NumberOrString::Number)
-                                    .or_else(|| {
-                                        req_id.as_str().map(|s| NumberOrString::String(s.into()))
-                                    })
-                                    .unwrap_or(NumberOrString::Number(0)),
-                                result: roots_result,
-                            };
+                            // Handle roots/list request from server
+                            if method == "roots/list" {
+                                let roots_result = ListRootsResult { roots: vec![] };
+                                let roots_response = JsonRpcResponse {
+                                    jsonrpc: Default::default(),
+                                    id: req_id
+                                        .as_i64()
+                                        .map(NumberOrString::Number)
+                                        .or_else(|| {
+                                            req_id.as_str().map(|s| NumberOrString::String(s.into()))
+                                        })
+                                        .unwrap_or(NumberOrString::Number(0)),
+                                    result: roots_result,
+                                };
 
-                            let roots_body =
-                                serde_json::to_vec(&roots_response).unwrap_or_else(|e| {
-                                    fatal!(3, "failed to serialize roots/list response: {e}")
-                                });
+                                let roots_body =
+                                    serde_json::to_vec(&roots_response).unwrap_or_else(|e| {
+                                        fatal!(3, "failed to serialize roots/list response: {e}")
+                                    });
 
-                            let _ = client
-                                .post(new_uri.to_string())
-                                .header(http::header::CONTENT_TYPE, "application/json")
-                                .body(roots_body)
-                                .send()
-                                .await
-                                .unwrap_or_else(|e| fatal!(3, "roots/list response failed: {e}"));
+                                let _ = send_post(
+                                    endpoint,
+                                    &new_uri,
+                                    &host,
+                                    port,
+                                    roots_body,
+                                    &mut stats,
+                                    &rt_stats,
+                                    &opts,
+                                )
+                                .await;
 
-                            continue; // Keep reading for tools/list response
+                                continue; // Keep reading for tools/list response
+                            }
                         }
                     }
-                }
 
-                // This should be the tools/list response
-                tools_response_body = data.to_string();
-                break 'sse_read;
+                    // This should be the tools/list response
+                    tools_response_body = data.to_string();
+                    break 'sse_read;
+                }
             }
         }
     }
@@ -775,8 +852,10 @@ pub async fn mcp_sse_initialize(uri: &str) -> McpSetup {
 
     // Spawn task to keep SSE connection alive
     let sse_task = tokio::spawn(async move {
-        while let Some(result) = stream.next().await {
-            if let Err(e) = result {
+        // Keep the connection task alive
+        let _conn = sse_conn_task;
+        while let Some(frame) = sse_body.frame().await {
+            if let Err(e) = frame {
                 eprintln!("SSE: error reading frame: {e}");
             }
         }
