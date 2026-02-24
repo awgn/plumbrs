@@ -9,14 +9,14 @@ use bytes::Bytes;
 
 use http::{HeaderMap, Request, StatusCode, header};
 
-use rmcp::serde_json;
-
+use rand::Rng;
 use rmcp::model::{
     CallToolRequest, CallToolRequestParam, ClientCapabilities, Implementation, InitializeRequest,
-    InitializeRequestParam, InitializeResult, InitializedNotification, JsonRpcRequest,
+    InitializeRequestParam, InitializeResult, InitializedNotification, JsonObject, JsonRpcRequest,
     JsonRpcResponse, ListRootsResult, ListToolsRequest, ListToolsResult, NumberOrString,
     ProtocolVersion,
 };
+use rmcp::serde_json::{self, Map, Value};
 
 use crate::client::utils::*;
 use crate::fatal;
@@ -230,6 +230,96 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
     }
 
     statistics
+}
+
+/// Generates a tool request with fuzzy values based on the input schema.
+/// Returns None if the schema is invalid or missing required fields.
+fn create_tool_request(arguments: &Arc<JsonObject>) -> Option<Map<String, Value>> {
+    let required = arguments.get("required").and_then(|v| v.as_array())?;
+    let properties = arguments.get("properties").and_then(|v| v.as_object())?;
+
+    let mut generated_request_args = Map::new();
+    let mut rng = rand::thread_rng();
+
+    for required_arg in required {
+        let field_name = required_arg.as_str()?;
+        let field_schema = properties.get(field_name)?;
+
+        let value = generate_value_from_schema(field_schema, &mut rng, 0);
+        generated_request_args.insert(field_name.to_string(), value);
+    }
+
+    Some(generated_request_args)
+}
+
+const MAX_RECURSION_DEPTH: usize = 10;
+
+fn generate_value_from_schema<R: Rng>(schema: &Value, rng: &mut R, depth: usize) -> Value {
+    // Prevent infinite recursion with self-referencing schemas
+    if depth >= MAX_RECURSION_DEPTH {
+        return Value::Null;
+    }
+
+    if let Some(default) = schema.get("default") {
+        return default.clone();
+    }
+
+    let type_str = schema
+        .get("type")
+        .and_then(|t| t.as_str())
+        .unwrap_or("string");
+
+    match type_str {
+        "string" => {
+            let len = rng.gen_range(5..20);
+            let s: String = (0..len)
+                .map(|_| rng.sample(rand::distributions::Alphanumeric) as char)
+                .collect();
+            Value::String(s)
+        }
+        "number" => Value::Number(rng.gen_range(-1000..1000i64).into()),
+        "integer" => Value::Number(rng.gen_range(0..1000).into()),
+        "boolean" => Value::Bool(rng.gen_bool(0.5)),
+        "array" => {
+            let len = rng.gen_range(1..4);
+            let items_schema = schema.get("items");
+            let items: Vec<Value> = (0..len)
+                .map(|_| {
+                    items_schema
+                        .map(|s| generate_value_from_schema(s, rng, depth + 1))
+                        .unwrap_or_else(|| generate_primitive_value(rng))
+                })
+                .collect();
+            Value::Array(items)
+        }
+        "object" => {
+            let mut obj = Map::new();
+            let num_props = rng.gen_range(1..4);
+            for i in 0..num_props {
+                let key = format!("prop{}", i);
+                let val = generate_primitive_value(rng);
+                obj.insert(key, val);
+            }
+            Value::Object(obj)
+        }
+        "null" => Value::Null,
+        _ => {
+            // Unknown type, default to string
+            Value::String("".to_string())
+        }
+    }
+}
+
+/// Generates a primitive value when no schema is available.
+/// Used as a fallback for array items without a defined schema.
+fn generate_primitive_value<R: Rng>(rng: &mut R) -> Value {
+    match rng.gen_range(0..4) {
+        0 => Value::String("sample".to_string()),
+        1 => Value::Number(rng.gen_range(-100..100i64).into()),
+        2 => Value::Number(rng.gen_range(0..100).into()),
+        3 => Value::Bool(rng.gen_bool(0.5)),
+        _ => Value::Null,
+    }
 }
 
 /// Initialize MCP connection via Streamable HTTP transport using hyper sender.
@@ -454,9 +544,10 @@ where
         .iter()
         .enumerate()
         .map(|(idx, tool)| {
+            let args = create_tool_request(&tool.input_schema);
             let call_params = CallToolRequestParam {
                 name: tool.name.clone(),
-                arguments: None,
+                arguments: args,
             };
 
             let call_request = CallToolRequest::new(call_params);
