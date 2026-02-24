@@ -293,7 +293,6 @@ fn print_latency(total: &Statistics) {
     }
 }
 
-
 fn tokio_thread(
     id: usize,
     opts: Options,

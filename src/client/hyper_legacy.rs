@@ -101,7 +101,8 @@ pub async fn http_hyper_legacy(
             if let Some(start_lat) = start_lat
                 && let Some(hist) = &mut statistics.latency
             {
-                hist.record(clock.delta_as_nanos(start_lat, clock.raw()) / 1000).ok();
+                hist.record(clock.delta_as_nanos(start_lat, clock.raw()) / 1000)
+                    .ok();
             };
 
             total += 1;

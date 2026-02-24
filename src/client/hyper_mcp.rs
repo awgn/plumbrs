@@ -201,7 +201,8 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
             if let Some(start_lat) = start_lat
                 && let Some(hist) = &mut statistics.latency
             {
-                hist.record(clock.delta_as_nanos(start_lat, clock.raw()) / 1000).ok();
+                hist.record(clock.delta_as_nanos(start_lat, clock.raw()) / 1000)
+                    .ok();
             };
 
             total += 1;
@@ -300,7 +301,8 @@ fn generate_value_from_schema<R: Rng>(schema: &Value, rng: &mut R, depth: usize)
                     for required_field in required {
                         if let Some(field_name) = required_field.as_str() {
                             if let Some(field_schema) = properties.get(field_name) {
-                                let value = generate_value_from_schema(field_schema, rng, depth + 1);
+                                let value =
+                                    generate_value_from_schema(field_schema, rng, depth + 1);
                                 obj.insert(field_name.to_string(), value);
                             }
                         }

@@ -142,20 +142,23 @@ pub async fn http_monoio(
                 let mut headers = [httparse::EMPTY_HEADER; 16];
 
                 // Check if we have a complete response
-                if let Ok((resp, response_end)) = FullResponse::decode(&connection_buffer, &mut headers)
+                if let Ok((resp, response_end)) =
+                    FullResponse::decode(&connection_buffer, &mut headers)
                 {
                     // Record latency if enabled
                     if let Some(start_lat) = start_lat
                         && let Some(hist) = &mut statistics.latency
                     {
-                        hist.record(clock.delta_as_nanos(start_lat, clock.raw()) / 1000).ok();
+                        hist.record(clock.delta_as_nanos(start_lat, clock.raw()) / 1000)
+                            .ok();
                     }
 
                     // Update statistics based on status code
                     match resp.head.code {
                         Some(200) => statistics.inc_ok(rt_stats),
                         Some(c) => {
-                            let code = StatusCode::from_u16(c).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+                            let code = StatusCode::from_u16(c)
+                                .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
                             statistics.set_http_status(code, rt_stats);
                         }
                         None => {
