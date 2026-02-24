@@ -32,7 +32,7 @@ Plumbrs is a high-performance HTTP/HTTP2 request generator designed for benchmar
 
 - `-r, --requests <NUMBER>` — Maximum requests per worker. If omitted, runs until duration elapses.
 
-- `-C, --client <TYPE>` (default: `auto`) — Client type: `auto`, `hyper`, `hyper-multichunk`, `hyper-h2`, `hyper-legacy`, `hyper-rt1`, `reqwest`, `tokio-uring`, `monoio`, or `help`.
+- `-C, --client <TYPE>` (default: `auto`) — Client type: `auto`, `hyper`, `hyper-mcp`, `hyper-multichunk`, `hyper-h2`, `hyper-legacy`, `hyper-rt1`, `reqwest`, `tokio-uring`, `monoio`, or `help`.
 
 - `--cps` — Open a new connection for every request, measuring Connections Per Second.
 
@@ -56,9 +56,7 @@ Plumbrs is a high-performance HTTP/HTTP2 request generator designed for benchmar
 
 - `-T, --trailer <KEY:VALUE>` — Add HTTP trailer (repeatable). Not available with `reqwest` client.
 
-- `-B, --body <BODY>` — Request body content. Can be specified multiple times for multi-chunk encoding, but multi-chunk is only supported with `hyper-multichunk` client.
-
-- `-b, --body-from-file <PATH>` — File path for request body (streamed).
+- `-b, --body <BODY>` — Request body content. Can be specified multiple times for multi-chunk encoding, but multi-chunk is only supported with `hyper-multichunk` client. Use `@path` to read the body from a file (streamed).
 
 - `--http2` — Use HTTP/2 only. Not available with `tokio-uring` or `monoio` clients.
 
@@ -139,12 +137,12 @@ POST request with headers and body:
 ```
 plumbrs -t 4 -c 100 -M POST \
   -H "Content-Type:application/json" \
-  -B '{"key":"value"}' http://localhost:8080/api
+  -b '{"key":"value"}' http://localhost:8080/api
 ```
 
 POST with body from file:
 ```
-plumbrs -M POST -b ./payload.json http://localhost:8080/api
+plumbrs -M POST -b @./payload.json http://localhost:8080/api
 ```
 
 HTTP/2 with flow control tuning:
@@ -178,6 +176,13 @@ The `tokio-uring` client delivers **382K RPS on a single thread** and scales to 
 ![HTTP/2 Performance](pics/http2_perf.png)
 
 The `hyper-h2` client achieves **187K RPS on a single thread** and **689K RPS with 4 threads**. The standard `hyper` client with HTTP/2 follows closely (135K → 580K RPS). All Plumbrs HTTP/2 clients outperform `rewrk` in this benchmark.
+
+## Enabling MCP support
+
+To enable MCP support, build Plumbrs with the `mcp` feature:
+```
+cargo build --release --features mcp
+```
 
 ## Enabling Tokio unstable APIs
 
