@@ -294,11 +294,18 @@ fn generate_value_from_schema<R: Rng>(schema: &Value, rng: &mut R, depth: usize)
         }
         "object" => {
             let mut obj = Map::new();
-            let num_props = rng.gen_range(1..4);
-            for i in 0..num_props {
-                let key = format!("prop{}", i);
-                let val = generate_primitive_value(rng);
-                obj.insert(key, val);
+            if let Some(properties) = schema.get("properties").and_then(|p| p.as_object()) {
+                if let Some(required) = schema.get("required").and_then(|r| r.as_array()) {
+                    // Generate values for required properties
+                    for required_field in required {
+                        if let Some(field_name) = required_field.as_str() {
+                            if let Some(field_schema) = properties.get(field_name) {
+                                let value = generate_value_from_schema(field_schema, rng, depth + 1);
+                                obj.insert(field_name.to_string(), value);
+                            }
+                        }
+                    }
+                }
             }
             Value::Object(obj)
         }
