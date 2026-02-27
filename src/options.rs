@@ -178,6 +178,13 @@ pub struct Options {
     )]
     pub mcp_sse: bool,
 
+    #[cfg(feature = "mcp")]
+    #[arg(
+        help = "Length of the random string for tools/call arguments. If not specified, a random length in [5,20] is used.",
+        long = "mcp-rand-string-len",
+    )]
+    pub mcp_rand_string_len: Option<usize>,
+
     #[cfg(all(target_os = "linux", any(feature = "tokio_uring", feature = "monoio")))]
     #[arg(
         long,

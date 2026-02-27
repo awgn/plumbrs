@@ -51,16 +51,16 @@ pub async fn http_hyper_mcp(
     rt_stats: &RealtimeStats,
 ) -> Statistics {
     if opts.http2 {
-        http_hyper_mcp_client::<Http2>(tid, cid, opts, rt_stats).await
+        http_hyper_mcp_client::<Http2>(tid, cid, opts.as_ref(), rt_stats).await
     } else {
-        http_hyper_mcp_client::<Http1>(tid, cid, opts, rt_stats).await
+        http_hyper_mcp_client::<Http1>(tid, cid, opts.as_ref(), rt_stats).await
     }
 }
 
 async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
     tid: usize,
     cid: usize,
-    opts: Arc<Options>,
+    opts: &Options,
     rt_stats: &RealtimeStats,
 ) -> Statistics {
     let mut statistics = Statistics::new(opts.latency);
@@ -75,13 +75,13 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
         get_conn_address(&opts, &uri).unwrap_or_else(|| fatal!(1, "no host specified in uri"));
     let mut endpoint = build_conn_endpoint(&host, port);
 
-    let mut headers = build_headers(&uri, opts.as_ref())
+    let mut headers = build_headers(&uri, opts)
         .unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
 
     // For SSE transport, initialize before connection loop
     let mut mcp = McpSetup::default();
     if opts.mcp_sse {
-        mcp = mcp_sse_initialize::<B>(&uri_str, opts.as_ref(), &headers).await;
+        mcp = mcp_sse_initialize::<B>(&uri_str, opts, &headers).await;
         uri = mcp.uri;
 
         if opts.host.is_none() {
@@ -146,7 +146,7 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
 
         // For Streamable HTTP transport, initialize after connection is established
         if !opts.mcp_sse && mcp.tool_bodies.is_empty() {
-            match mcp_streamable_http_initialize(&uri, &headers, &mut sender).await {
+            match mcp_streamable_http_initialize(&uri, &headers, &mut sender, opts).await {
                 Ok(setup) => {
                     mcp = setup;
                     // Add session ID to headers for subsequent requests
@@ -235,7 +235,7 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
 
 /// Generates a tool request with fuzzy values based on the input schema.
 /// Returns None if the schema is invalid or missing required fields.
-fn create_tool_request(arguments: &Arc<JsonObject>) -> Option<Map<String, Value>> {
+fn create_tool_request(arguments: &Arc<JsonObject>, opts: &Options) -> Option<Map<String, Value>> {
     let required = arguments.get("required").and_then(|v| v.as_array())?;
     let properties = arguments.get("properties").and_then(|v| v.as_object())?;
 
@@ -246,7 +246,7 @@ fn create_tool_request(arguments: &Arc<JsonObject>) -> Option<Map<String, Value>
         let field_name = required_arg.as_str()?;
         let field_schema = properties.get(field_name)?;
 
-        let value = generate_value_from_schema(field_schema, &mut rng, 0);
+        let value = generate_value_from_schema(field_schema, &mut rng, opts, 0);
         generated_request_args.insert(field_name.to_string(), value);
     }
 
@@ -255,7 +255,7 @@ fn create_tool_request(arguments: &Arc<JsonObject>) -> Option<Map<String, Value>
 
 const MAX_RECURSION_DEPTH: usize = 10;
 
-fn generate_value_from_schema<R: Rng>(schema: &Value, rng: &mut R, depth: usize) -> Value {
+fn generate_value_from_schema<R: Rng>(schema: &Value, rng: &mut R, opts: &Options, depth: usize) -> Value {
     // Prevent infinite recursion with self-referencing schemas
     if depth >= MAX_RECURSION_DEPTH {
         return Value::Null;
@@ -272,7 +272,7 @@ fn generate_value_from_schema<R: Rng>(schema: &Value, rng: &mut R, depth: usize)
 
     match type_str {
         "string" => {
-            let len = rng.gen_range(5..20);
+            let len = opts.mcp_rand_string_len.unwrap_or_else(|| rng.gen_range(5..20));
             let s: String = (0..len)
                 .map(|_| rng.sample(rand::distributions::Alphanumeric) as char)
                 .collect();
@@ -287,7 +287,7 @@ fn generate_value_from_schema<R: Rng>(schema: &Value, rng: &mut R, depth: usize)
             let items: Vec<Value> = (0..len)
                 .map(|_| {
                     items_schema
-                        .map(|s| generate_value_from_schema(s, rng, depth + 1))
+                        .map(|s| generate_value_from_schema(s, rng, opts, depth + 1))
                         .unwrap_or_else(|| generate_primitive_value(rng))
                 })
                 .collect();
@@ -302,7 +302,7 @@ fn generate_value_from_schema<R: Rng>(schema: &Value, rng: &mut R, depth: usize)
                         if let Some(field_name) = required_field.as_str() {
                             if let Some(field_schema) = properties.get(field_name) {
                                 let value =
-                                    generate_value_from_schema(field_schema, rng, depth + 1);
+                                    generate_value_from_schema(field_schema, rng, opts, depth + 1);
                                 obj.insert(field_name.to_string(), value);
                             }
                         }
@@ -341,6 +341,7 @@ async fn mcp_streamable_http_initialize<S>(
     uri: &hyper::Uri,
     base_headers: &http::HeaderMap,
     sender: &mut S,
+    opts: &Options
 ) -> Result<McpSetup, Box<dyn std::error::Error + Send + Sync>>
 where
     S: RequestSender<Full<Bytes>>,
@@ -553,7 +554,7 @@ where
         .iter()
         .enumerate()
         .map(|(idx, tool)| {
-            let args = create_tool_request(&tool.input_schema);
+            let args = create_tool_request(&tool.input_schema, opts);
             let call_params = CallToolRequestParam {
                 name: tool.name.clone(),
                 arguments: args,
