@@ -11,10 +11,9 @@ use http::{HeaderMap, Request, StatusCode, header};
 
 use rand::Rng;
 use rmcp::model::{
-    CallToolRequest, CallToolRequestParam, ClientCapabilities, Implementation, InitializeRequest,
-    InitializeRequestParam, InitializeResult, InitializedNotification, JsonObject, JsonRpcRequest,
+    CallToolRequest, CallToolRequestParams, ClientCapabilities, Implementation, InitializeRequest,
+    InitializeRequestParams, InitializeResult, InitializedNotification, JsonObject, JsonRpcRequest,
     JsonRpcResponse, ListRootsResult, ListToolsRequest, ListToolsResult, NumberOrString,
-    ProtocolVersion,
 };
 use rmcp::serde_json::{self, Map, Value};
 
@@ -75,8 +74,8 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
         get_conn_address(&opts, &uri).unwrap_or_else(|| fatal!(1, "no host specified in uri"));
     let mut endpoint = build_conn_endpoint(&host, port);
 
-    let mut headers = build_headers(&uri, opts)
-        .unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
+    let mut headers =
+        build_headers(&uri, opts).unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
 
     // For SSE transport, initialize before connection loop
     let mut mcp = McpSetup::default();
@@ -255,7 +254,12 @@ fn create_tool_request(arguments: &Arc<JsonObject>, opts: &Options) -> Option<Ma
 
 const MAX_RECURSION_DEPTH: usize = 10;
 
-fn generate_value_from_schema<R: Rng>(schema: &Value, rng: &mut R, opts: &Options, depth: usize) -> Value {
+fn generate_value_from_schema<R: Rng>(
+    schema: &Value,
+    rng: &mut R,
+    opts: &Options,
+    depth: usize,
+) -> Value {
     // Prevent infinite recursion with self-referencing schemas
     if depth >= MAX_RECURSION_DEPTH {
         return Value::Null;
@@ -272,7 +276,9 @@ fn generate_value_from_schema<R: Rng>(schema: &Value, rng: &mut R, opts: &Option
 
     match type_str {
         "string" => {
-            let len = opts.mcp_rand_string_len.unwrap_or_else(|| rng.gen_range(5..20));
+            let len = opts
+                .mcp_rand_string_len
+                .unwrap_or_else(|| rng.gen_range(5..20));
             let s: String = (0..len)
                 .map(|_| rng.sample(rand::distributions::Alphanumeric) as char)
                 .collect();
@@ -341,21 +347,16 @@ async fn mcp_streamable_http_initialize<S>(
     uri: &hyper::Uri,
     base_headers: &http::HeaderMap,
     sender: &mut S,
-    opts: &Options
+    opts: &Options,
 ) -> Result<McpSetup, Box<dyn std::error::Error + Send + Sync>>
 where
     S: RequestSender<Full<Bytes>>,
 {
     // Step 1: Send MCP initialize request
-    let init_params = InitializeRequestParam {
-        protocol_version: ProtocolVersion::LATEST,
-        capabilities: ClientCapabilities::builder().enable_roots().build(),
-        client_info: Implementation {
-            name: "plumbrs".to_string(),
-            version: env!("CARGO_PKG_VERSION").to_string(),
-            ..Default::default()
-        },
-    };
+    let init_params = InitializeRequestParams::new(
+        ClientCapabilities::builder().enable_roots().build(),
+        Implementation::new("plumbrs".to_string(), env!("CARGO_PKG_VERSION").to_string()),
+    );
 
     let init_request = InitializeRequest::new(init_params);
 
@@ -554,10 +555,10 @@ where
         .iter()
         .enumerate()
         .map(|(idx, tool)| {
-            let args = create_tool_request(&tool.input_schema, opts);
-            let call_params = CallToolRequestParam {
-                name: tool.name.clone(),
-                arguments: args,
+            let call_params = if let Some(args) = create_tool_request(&tool.input_schema, opts) {
+                CallToolRequestParams::new(tool.name.clone()).with_arguments(args)
+            } else {
+                CallToolRequestParams::new(tool.name.clone())
             };
 
             let call_request = CallToolRequest::new(call_params);
@@ -769,15 +770,10 @@ where
     }
 
     // Step 2: Send MCP initialize request
-    let init_params = InitializeRequestParam {
-        protocol_version: ProtocolVersion::LATEST,
-        capabilities: ClientCapabilities::builder().enable_roots().build(),
-        client_info: Implementation {
-            name: "plumbrs".to_string(),
-            version: env!("CARGO_PKG_VERSION").to_string(),
-            ..Default::default()
-        },
-    };
+    let init_params = InitializeRequestParams::new(
+        ClientCapabilities::builder().enable_roots().build(),
+        Implementation::new("plumbrs".to_string(), env!("CARGO_PKG_VERSION").to_string()),
+    );
 
     let init_request = InitializeRequest::new(init_params);
 
@@ -848,7 +844,7 @@ where
                 if let Some(req_id) = server_req.get("id") {
                     // Handle roots/list request from server
                     if method == "roots/list" {
-                        let roots_result = ListRootsResult { roots: vec![] };
+                        let roots_result = ListRootsResult::new(vec![]);
                         let roots_response = JsonRpcResponse {
                             jsonrpc: Default::default(),
                             id: req_id
@@ -901,11 +897,7 @@ where
         .iter()
         .enumerate()
         .map(|(idx, tool)| {
-            let call_params = CallToolRequestParam {
-                name: tool.name.clone(),
-                arguments: None,
-            };
-
+            let call_params = CallToolRequestParams::new(tool.name.clone());
             let call_request = CallToolRequest::new(call_params);
 
             let call_jsonrpc = JsonRpcRequest {

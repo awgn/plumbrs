@@ -3,7 +3,7 @@ use std::{collections::HashSet, sync::Arc, time::Instant};
 use bytes::Bytes;
 use http::{Request, StatusCode};
 use http_body_util::{BodyExt, Either, Full};
-use http_wire::{WireDecode, WireEncodeAsync, response::FullResponse};
+use http_wire::{WireDecode, WireEncode, response::FullResponse};
 use tokio_uring::net::TcpStream;
 
 use crate::{
@@ -65,8 +65,7 @@ pub async fn http_io_uring(
 
     // Pre-serialize the request to bytes ONCE outside the loop for better performance
     let request_bytes = req
-        .encode_async()
-        .await
+        .encode()
         .unwrap_or_else(|e| fatal!(2, "could not serialize request: {e}"));
 
     let clock = quanta::Clock::new();
