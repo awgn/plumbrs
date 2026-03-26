@@ -1,4 +1,6 @@
 use crate::Options;
+use http::header;
+use http::header::HeaderValue;
 use crate::stats::{RealtimeStats, Statistics};
 
 use std::collections::HashSet;
@@ -79,8 +81,12 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
             };
 
         statistics.inc_conn();
+        let mut conn_req_count: u32 = 0;
 
         loop {
+            conn_req_count += 1;
+            let is_last = conn_req_count >= opts.rpc;
+
             let stream = opts
                 .stream_bodies()
                 .await
@@ -100,7 +106,11 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
             let mut req = Request::new(body);
             *req.method_mut() = opts.method.clone().unwrap_or(http::Method::GET);
             *req.uri_mut() = uri.clone();
-            *req.headers_mut() = headers.clone();
+            let mut req_headers = headers.clone();
+            if is_last {
+                req_headers.insert(header::CONNECTION, HeaderValue::from_static("close"));
+            }
+            *req.headers_mut() = req_headers;
 
             let start_lat = opts.latency.then_some(clock.raw());
 
@@ -134,7 +144,7 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
                 break 'connection;
             }
 
-            if opts.cps {
+            if is_last {
                 conn_task.abort();
                 (sender, conn_task) =
                     match B::build_connection(endpoint, &mut statistics, rt_stats, &opts).await {
@@ -144,6 +154,7 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
                             continue 'connection;
                         }
                     };
+                conn_req_count = 0;
             } else {
                 let res = sender.ready().await;
                 if let Err(ref err) = res {

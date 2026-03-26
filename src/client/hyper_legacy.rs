@@ -2,7 +2,8 @@ use crate::stats::{RealtimeStats, Statistics};
 use crate::{Options, fatal};
 
 use bytes::Bytes;
-use http::Request;
+use http::{Request, header};
+use http::header::HeaderValue;
 use http_body_util::{BodyExt, Either, Full};
 use hyper::StatusCode;
 use std::collections::HashSet;
@@ -58,8 +59,12 @@ pub async fn http_hyper_legacy(
         let mut client = build_http_connection_legacy(&opts);
 
         statistics.inc_conn();
+        let mut conn_req_count: u32 = 0;
 
         loop {
+            conn_req_count += 1;
+            let is_last = conn_req_count >= opts.rpc;
+
             let body = bodies
                 .get(total as usize)
                 .or(bodies.last())
@@ -77,7 +82,11 @@ pub async fn http_hyper_legacy(
             let mut req = Request::new(body);
             *req.method_mut() = opts.method.clone().unwrap_or(http::Method::GET);
             *req.uri_mut() = uri.clone();
-            *req.headers_mut() = headers.clone();
+            let mut req_headers = headers.clone();
+            if is_last {
+                req_headers.insert(header::CONNECTION, HeaderValue::from_static("close"));
+            }
+            *req.headers_mut() = req_headers;
 
             let start_lat = opts.latency.then_some(clock.raw());
 
@@ -111,8 +120,9 @@ pub async fn http_hyper_legacy(
                 break 'connection;
             }
 
-            if opts.cps {
+            if is_last {
                 client = build_http_connection_legacy(&opts);
+                conn_req_count = 0;
             }
         }
     }

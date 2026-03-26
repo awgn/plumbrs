@@ -36,10 +36,6 @@ pub fn build_headers(
 ) -> Result<HeaderMap, http::header::InvalidHeaderValue> {
     let mut headers = HeaderMap::new();
 
-    if opts.cps {
-        headers.append(header::CONNECTION, HeaderValue::from_str("close")?);
-    }
-
     if !opts.trailers.is_empty() {
         let trailers = opts
             .trailers

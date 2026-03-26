@@ -1,7 +1,8 @@
 use crate::stats::{RealtimeStats, Statistics};
 use crate::{Options, fatal};
 
-use http::{HeaderMap, StatusCode};
+use http::{HeaderMap, StatusCode, header};
+use http::header::HeaderValue;
 
 use crate::client::utils::{build_headers, should_stop};
 use reqwest::{Client, ClientBuilder, Request, Result, Url};
@@ -62,15 +63,23 @@ pub async fn http_reqwest(
         };
 
         statistics.inc_conn();
+        let mut conn_req_count: u32 = 0;
 
         loop {
+            conn_req_count += 1;
+            let is_last = conn_req_count >= opts.rpc;
+
             let body = bodies.get(total as usize).or(bodies.last());
 
             let mut req = Request::new(
                 opts.method.clone().unwrap_or(http::Method::GET),
                 url.clone(),
             );
-            *req.headers_mut() = headers.clone();
+            let mut req_headers = headers.clone();
+            if is_last {
+                req_headers.insert(header::CONNECTION, HeaderValue::from_static("close"));
+            }
+            *req.headers_mut() = req_headers;
 
             if let Some(body) = body {
                 *req.body_mut() = Some(body.clone().into());
@@ -106,13 +115,14 @@ pub async fn http_reqwest(
                 break 'connection;
             }
 
-            if opts.cps {
+            if is_last {
                 client = match build_http_client(opts.as_ref(), &headers) {
                     Ok(client) => client,
                     Err(e) => {
                         fatal!(4, "could not build reqwest http client: {e}");
                     }
                 };
+                conn_req_count = 0;
             }
         }
     }

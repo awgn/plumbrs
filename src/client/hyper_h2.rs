@@ -119,8 +119,12 @@ pub async fn http_hyper_h2(
         });
 
         statistics.inc_conn();
+        let mut conn_req_count: u32 = 0;
 
         loop {
+            conn_req_count += 1;
+            let is_last = conn_req_count >= opts.rpc;
+
             let body = bodies.get(total as usize).or(bodies.last());
 
             let mut req = Request::new(());
@@ -199,7 +203,7 @@ pub async fn http_hyper_h2(
                 break 'connection;
             }
 
-            if opts.cps {
+            if is_last {
                 let stream_res = TcpStream::connect(endpoint)
                     .await
                     .and_then(|s| s.set_nodelay(true).map(|_| s));
@@ -252,6 +256,8 @@ pub async fn http_hyper_h2(
                         eprintln!("error in connection: {}", err)
                     }
                 });
+
+                conn_req_count = 0;
             }
         }
     }

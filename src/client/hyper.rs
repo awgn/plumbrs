@@ -6,7 +6,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use bytes::Bytes;
-use http::{Request, StatusCode};
+use http::{Request, StatusCode, header};
+use http::header::HeaderValue;
 
 use crate::client::utils::*;
 use crate::fatal;
@@ -33,6 +34,7 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
 ) -> Statistics {
     let mut statistics = Statistics::new(opts.latency);
     let mut total: u32 = 0;
+    let mut conn_req_count: u32;
     let mut banner = HashSet::new();
     let uri_str = opts.uri[cid % opts.uri.len()].as_str();
     let uri = uri_str
@@ -84,6 +86,7 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
             };
 
         statistics.inc_conn();
+        conn_req_count = 0;
 
         loop {
             let body = bodies
@@ -100,10 +103,18 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
                 }
             };
 
+            conn_req_count += 1;
+            let is_last = conn_req_count >= opts.rpc;
+
+            let mut req_headers = headers.clone();
+            if is_last {
+                req_headers.insert(header::CONNECTION, HeaderValue::from_static("close"));
+            }
+
             let mut req = Request::new(body);
             *req.method_mut() = opts.method.clone().unwrap_or(http::Method::GET);
             *req.uri_mut() = uri.clone();
-            *req.headers_mut() = headers.clone();
+            *req.headers_mut() = req_headers;
 
             let start_lat = opts.latency.then_some(clock.raw());
 
@@ -137,7 +148,7 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
                 break 'connection;
             }
 
-            if opts.cps {
+            if is_last {
                 conn_task.abort();
                 continue 'connection;
             } else {

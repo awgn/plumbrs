@@ -34,7 +34,7 @@ Plumbrs is a high-performance HTTP/HTTP2 request generator designed for benchmar
 
 - `-C, --client <TYPE>` (default: `auto`) — Client type: `auto`, `hyper`, `hyper-mcp`, `hyper-multichunk`, `hyper-h2`, `hyper-legacy`, `hyper-rt1`, `reqwest`, `tokio-uring`, `monoio`, or `help`.
 
-- `--cps` — Open a new connection for every request, measuring Connections Per Second.
+- `--rpc <NUMBER>` — Requests per connection. After every N requests the connection is closed (`Connection: close` is sent on the last request) and a new one is opened. Use `--rpc 1` to measure Connections Per Second. By default, connections are reused indefinitely.
 
 - `--latency` — Enable latency estimation using Gil Tene's coordinated omission correction algorithm.
 
@@ -155,7 +155,7 @@ plumbrs -C hyper --http2 \
 
 Connections Per Second test:
 ```
-plumbrs -C hyper --cps -c 10 -r 1000 http://localhost:8080
+plumbrs -C hyper --rpc 1 -c 10 -r 1000 http://localhost:8080
 ```
 
 Latency-corrected benchmarking:

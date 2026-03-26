@@ -82,11 +82,11 @@ pub struct Options {
     )]
     pub body: Vec<String>,
     #[arg(
-        help = "Open a new connection for every request, computing Connections Per Second",
-        long = "cps",
-        default_value_t = false
+        help = "Requests per connection to issue (--rpc 1 is useful to evaluate connections per second)",
+        long = "rpc",
+        default_value_t = u32::MAX
     )]
-    pub cps: bool,
+    pub rpc: u32,
     #[arg(help = "Use http2 only", long = "http2")]
     pub http2: bool,
     #[arg(
