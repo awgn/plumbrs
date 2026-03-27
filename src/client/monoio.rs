@@ -25,6 +25,7 @@ pub async fn http_monoio(
     let mut statistics = Statistics::new(opts.latency);
 
     let mut total: u32 = 0;
+    let mut conn_req_count: u32;
     let mut banner = HashSet::new();
     let uri_str = opts.uri[cid % opts.uri.len()].as_str();
     let uri = uri_str
@@ -98,6 +99,7 @@ pub async fn http_monoio(
         };
 
         statistics.inc_conn();
+        conn_req_count = 0;
 
         // Buffer for reading responses
         let mut connection_buffer = Vec::new();
@@ -170,13 +172,14 @@ pub async fn http_monoio(
                     connection_buffer.drain(..response_end);
 
                     total += 1;
+                    conn_req_count += 1;
 
                     if should_stop(total, start, &opts) {
                         break 'connection;
                     }
 
-                    // If cps mode, close connection after each request
-                    if opts.cps {
+                    // If rpc limit reached, close connection and open a new one
+                    if conn_req_count >= opts.rpc {
                         continue 'connection;
                     }
 

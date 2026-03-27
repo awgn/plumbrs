@@ -64,6 +64,7 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
 ) -> Statistics {
     let mut statistics = Statistics::new(opts.latency);
     let mut total: u32 = 0;
+    let mut conn_req_count: u32;
     let mut banner = HashSet::new();
     let uri_str = opts.uri[cid % opts.uri.len()].as_str();
     let mut uri = uri_str
@@ -142,6 +143,7 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
             };
 
         statistics.inc_conn();
+        conn_req_count = 0;
 
         // For Streamable HTTP transport, initialize after connection is established
         if !opts.mcp_sse && mcp.tool_bodies.is_empty() {
@@ -171,11 +173,19 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
                 .cloned()
                 .unwrap_or_else(|| Full::new(Bytes::from("")));
 
+            conn_req_count += 1;
+            let is_last = conn_req_count >= opts.rpc;
+
+            let mut req_headers = headers.clone();
+            if is_last {
+                req_headers.insert(header::CONNECTION, header::HeaderValue::from_static("close"));
+            }
+
             let mut req = Request::new(body);
             // MCP JSON-RPC requests must use POST method
             *req.method_mut() = http::Method::POST;
             *req.uri_mut() = uri.clone();
-            *req.headers_mut() = headers.clone();
+            *req.headers_mut() = req_headers;
 
             let start_lat = opts.latency.then_some(clock.raw());
 
@@ -210,7 +220,7 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
                 break 'connection;
             }
 
-            if opts.cps {
+            if is_last {
                 conn_task.abort();
                 continue 'connection;
             } else {
