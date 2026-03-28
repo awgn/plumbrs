@@ -9,15 +9,16 @@ use clap::Parser;
 use client::ClientType;
 
 use crossterm::{cursor, execute};
-#[cfg(not(target_env = "msvc"))]
-use tikv_jemallocator::Jemalloc;
+
+#[cfg(feature = "mimalloc")]
+use mimalloc::MiMalloc;
 
 use crate::options::Options;
 use ctor::dtor;
 
-#[cfg(not(target_env = "msvc"))]
+#[cfg(feature = "mimalloc")]
 #[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
+static GLOBAL: MiMalloc = MiMalloc;
 
 #[dtor]
 fn cleanup() {
@@ -27,6 +28,11 @@ fn cleanup() {
 fn main() -> Result<()> {
     // Hide cursor and ensure it's restored on exit
     _ = execute!(std::io::stdout(), cursor::Hide);
+
+    #[cfg(feature = "mimalloc")]
+    eprintln!("using allocator: mimalloc");
+    #[cfg(not(feature = "mimalloc"))]
+    eprintln!("using allocator: system");
 
     pretty_env_logger::init();
     let mut opts = Options::parse();
