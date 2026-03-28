@@ -75,6 +75,8 @@ Two transport modes are supported:
 
 - `--mcp-sse` — Enable MCP mode with legacy **Server-Sent Events (SSE)** transport. This older transport uses a persistent SSE connection for receiving responses while sending requests via separate HTTP POST calls.
 
+- `--mcp-rand-string-len <NUMBER>` — Fix the length of random strings generated for `tools/call` arguments. If omitted, a random length between 5 and 20 is used each time.
+
 Both options are only available with `auto` or `hyper-mcp` client types.
 
 **Example — Benchmark an MCP server with Streamable HTTP:**
@@ -176,6 +178,15 @@ The `tokio-uring` client delivers **382K RPS on a single thread** and scales to 
 ![HTTP/2 Performance](pics/http2_perf.png)
 
 The `hyper-h2` client achieves **187K RPS on a single thread** and **689K RPS with 4 threads**. The standard `hyper` client with HTTP/2 follows closely (135K → 580K RPS). All Plumbrs HTTP/2 clients outperform `rewrk` in this benchmark.
+
+## Allocator features
+
+Plumbrs uses [mimalloc](https://github.com/microsoft/mimalloc) by default for improved memory allocation performance.
+
+| Build command | Allocator |
+|---|---|
+| `cargo build --release` | mimalloc (default) |
+| `cargo build --release --no-default-features` | system allocator |
 
 ## Enabling MCP support
 
