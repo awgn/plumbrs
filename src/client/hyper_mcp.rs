@@ -907,7 +907,12 @@ where
         .iter()
         .enumerate()
         .map(|(idx, tool)| {
-            let call_params = CallToolRequestParams::new(tool.name.clone());
+            let call_params = if let Some(args) = create_tool_request(&tool.input_schema, opts) {
+                 CallToolRequestParams::new(tool.name.clone()).with_arguments(args)
+             } else {
+                 CallToolRequestParams::new(tool.name.clone())
+             };
+
             let call_request = CallToolRequest::new(call_params);
 
             let call_jsonrpc = JsonRpcRequest {
