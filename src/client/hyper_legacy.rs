@@ -74,7 +74,7 @@ pub async fn http_hyper_legacy(
             let body = match &trailers {
                 None => Either::Left(body.clone()),
                 tr => {
-                    let trailers = tr.clone().map(Result::Ok);
+                    let trailers = tr.clone().map(Ok);
                     Either::Right(body.clone().with_trailers(std::future::ready(trailers)))
                 }
             };

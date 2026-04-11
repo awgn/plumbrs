@@ -96,7 +96,7 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
             let body = match &trailers {
                 None => Either::Left(StreamBody::new(stream)),
                 Some(tr) => {
-                    let trailers = Some(Result::Ok(tr.clone()));
+                    let trailers = Some(Ok(tr.clone()));
                     Either::Right(
                         StreamBody::new(stream).with_trailers(std::future::ready(trailers)),
                     )
