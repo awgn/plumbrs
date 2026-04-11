@@ -3,7 +3,7 @@ pub mod hyper_h2;
 pub mod hyper_legacy;
 #[cfg(feature = "mcp")]
 pub mod hyper_mcp;
-pub mod hyper_multichunk;
+pub mod hyper_chunked;
 pub mod hyper_rt1;
 #[cfg(all(target_os = "linux", feature = "monoio"))]
 pub mod monoio;
@@ -19,7 +19,7 @@ pub enum ClientType {
     #[cfg(feature = "mcp")]
     HyperMcp,
     HyperLegacy,
-    HyperMultichunk,
+    HyperChunked,
     HyperRt1,
     HyperH2,
     Hyper,
@@ -37,7 +37,7 @@ impl std::fmt::Display for ClientType {
             ClientType::Auto => write!(f, "auto"),
             ClientType::Hyper => write!(f, "hyper"),
             ClientType::HyperLegacy => write!(f, "hyper-legacy"),
-            ClientType::HyperMultichunk => write!(f, "hyper-multichunk"),
+            ClientType::HyperChunked => write!(f, "hyper-chunked"),
             ClientType::HyperRt1 => write!(f, "hyper-rt1"),
             ClientType::HyperH2 => write!(f, "hyper-h2"),
             #[cfg(feature = "mcp")]

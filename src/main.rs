@@ -61,6 +61,18 @@ fn check_options(opts: &mut Options) -> Result<()> {
         return Err(anyhow!("MCP not supported with this client!"));
     }
 
+    if !opts.trailers.is_empty() {
+        match opts.client_type {
+            ClientType::Auto => opts.client_type = ClientType::HyperChunked,
+            ClientType::HyperChunked | ClientType::HyperH2 => {}
+            _ => {
+                return Err(anyhow!(
+                    "Trailers are only supported with hyper-chunked or hyper-h2 clients!"
+                ));
+            }
+        }
+    }
+
     match opts.client_type {
         #[cfg(all(target_os = "linux", feature = "tokio_uring"))]
         ClientType::TokioUring if opts.http2 => {
@@ -90,16 +102,13 @@ fn check_options(opts: &mut Options) -> Result<()> {
         ClientType::HyperLegacy | ClientType::HyperRt1 if opts.host.is_some() => {
             return Err(anyhow!("Host option not available with this client!"));
         }
-        ClientType::Reqwest if !opts.trailers.is_empty() => {
-            return Err(anyhow!("Trailers not supported with reqwest client!"));
-        }
         ClientType::Help => {
             println!("Available client types:");
             println!(
                 "  hyper             - Hyper client, one per connection. Both HTTP/1 and HTTP/2"
             );
             println!(
-                "  hyper-multichunk  - Hyper client, one per connection, with multi-chunked body. Both HTTP/1 and HTTP/2"
+                "  hyper-chunked  - Hyper client, one per connection, with multi-chunked body. Both HTTP/1 and HTTP/2"
             );
             println!(
                 "  hyper-h2          - Hyper client, one per connection. Use h2 package, HTTP/2 only"

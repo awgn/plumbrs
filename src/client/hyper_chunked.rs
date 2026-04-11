@@ -15,7 +15,7 @@ use crate::fatal;
 use futures_util::StreamExt;
 use http_body_util::{BodyExt, Either, StreamBody};
 
-pub async fn http_hyper_multichunk(
+pub async fn http_hyper_chunked(
     tid: usize,
     cid: usize,
     opts: Arc<Options>,
@@ -62,7 +62,7 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
         if cid < opts.uri.len() && !banner.contains(uri_str) {
             banner.insert(uri_str.to_owned());
             println!(
-                "hyper-multichunk [{tid:>2}] -> connecting to {}:{}, method = {} uri = {} {}...",
+                "hyper-chunked [{tid:>2}] -> connecting to {}:{}, method = {} uri = {} {}...",
                 host,
                 port,
                 opts.method.as_ref().unwrap_or(&http::Method::GET),

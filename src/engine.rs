@@ -5,7 +5,7 @@ use crate::client::hyper_h2::*;
 use crate::client::hyper_legacy::*;
 #[cfg(feature = "mcp")]
 use crate::client::hyper_mcp::http_hyper_mcp;
-use crate::client::hyper_multichunk::http_hyper_multichunk;
+use crate::client::hyper_chunked::http_hyper_chunked;
 use crate::client::hyper_rt1::{RequestBody, http_hyper_rt1};
 #[cfg(all(target_os = "linux", feature = "monoio"))]
 use crate::client::monoio::*;
@@ -522,7 +522,7 @@ async fn spawn_tasks(
             ClientType::Auto => {
                 if opts.body.len() > 1 {
                     tasks.spawn(
-                        async move { http_hyper_multichunk(id, con, opts, &stats[id]).await },
+                        async move { http_hyper_chunked(id, con, opts, &stats[id]).await },
                     );
                 } else {
                     #[cfg(feature = "mcp")]
@@ -544,8 +544,8 @@ async fn spawn_tasks(
             ClientType::Hyper => {
                 tasks.spawn(async move { http_hyper(id, con, opts, &stats[id]).await });
             }
-            ClientType::HyperMultichunk => {
-                tasks.spawn(async move { http_hyper_multichunk(id, con, opts, &stats[id]).await });
+            ClientType::HyperChunked => {
+                tasks.spawn(async move { http_hyper_chunked(id, con, opts, &stats[id]).await });
             }
             ClientType::HyperLegacy => {
                 tasks.spawn(async move { http_hyper_legacy(id, con, opts, &stats[id]).await });

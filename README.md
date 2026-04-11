@@ -9,7 +9,7 @@ Plumbrs is a high-performance HTTP/HTTP2 request generator designed for benchmar
 - **Auto** (`auto`) — Automatically select the best client (default).
 - **Hyper** (`hyper`) — Hyper-based HTTP client (one per connection).
 - **Hyper MCP** (`hyper-mcp`) — Hyper client for MCP (Model Context Protocol) servers (requires `mcp` feature).
-- **Hyper multichunk** (`hyper-multichunk`) — Hyper client with multi-chunked body (one per connection).
+- **Hyper chunked** (`hyper-chunked`) — Hyper client with multi-chunked body (one per connection).
 - **Hyper legacy** (`hyper-legacy`) — Legacy Hyper HTTP client (one per connection).
 - **Hyper RT1** (`hyper-rt1`) — Legacy Hyper HTTP client shared across a runtime.
 - **Hyper H2** (`hyper-h2`) — HTTP/2 client using Hyper with the h2 library (one per connection).
@@ -32,7 +32,7 @@ Plumbrs is a high-performance HTTP/HTTP2 request generator designed for benchmar
 
 - `-r, --requests <NUMBER>` — Maximum requests per worker. If omitted, runs until duration elapses.
 
-- `-C, --client <TYPE>` (default: `auto`) — Client type: `auto`, `hyper`, `hyper-mcp`, `hyper-multichunk`, `hyper-h2`, `hyper-legacy`, `hyper-rt1`, `reqwest`, `tokio-uring`, `monoio`, or `help`.
+- `-C, --client <TYPE>` (default: `auto`) — Client type: `auto`, `hyper`, `hyper-mcp`, `hyper-chunked`, `hyper-h2`, `hyper-legacy`, `hyper-rt1`, `reqwest`, `tokio-uring`, `monoio`, or `help`.
 
 - `--rpc <NUMBER>` — Requests per connection. After every N requests the connection is closed (`Connection: close` is sent on the last request) and a new one is opened. Use `--rpc 1` to measure Connections Per Second. By default, connections are reused indefinitely.
 
@@ -56,7 +56,7 @@ Plumbrs is a high-performance HTTP/HTTP2 request generator designed for benchmar
 
 - `-T, --trailer <KEY:VALUE>` — Add HTTP trailer (repeatable). Not available with `reqwest` client.
 
-- `-b, --body <BODY>` — Request body content. Can be specified multiple times for multi-chunk encoding, but multi-chunk is only supported with `hyper-multichunk` client. Use `@path` to read the body from a file (streamed).
+- `-b, --body <BODY>` — Request body content. Can be specified multiple times for multi-chunk encoding, but multi-chunk is only supported with `hyper-chunked` client. Use `@path` to read the body from a file (streamed).
 
 - `--http2` — Use HTTP/2 only. Not available with `tokio-uring` or `monoio` clients.
 
