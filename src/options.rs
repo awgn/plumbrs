@@ -236,14 +236,11 @@ impl Options {
             let stream = tokio_util::io::ReaderStream::new(file);
             Ok(Either::Left(stream.map(|r| Ok(r.unwrap()))))
         } else {
-            let mut chunks: Vec<Bytes> = self
+            let chunks: Vec<Bytes> = self
                 .body
                 .iter()
                 .map(|s| Bytes::from(s.to_owned()))
                 .collect();
-            if chunks.is_empty() && !self.trailers.is_empty() {
-                chunks.push(Bytes::new());
-            }
             let stream = futures_util::stream::iter(chunks.into_iter().map(Ok));
             Ok(Either::Right(stream))
         }
