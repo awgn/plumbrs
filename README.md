@@ -9,13 +9,14 @@ Plumbrs is a high-performance HTTP/HTTP2 request generator designed for benchmar
 - **Auto** (`auto`) — Automatically select the best client (default).
 - **Hyper** (`hyper`) — Hyper-based HTTP client (one per connection).
 - **Hyper MCP** (`hyper-mcp`) — Hyper client for MCP (Model Context Protocol) servers (requires `mcp` feature).
-- **Hyper chunked** (`hyper-chunked`) — Hyper client with multi-chunked body (one per connection).
+- **Hyper chunked** (`hyper-chunked`) — Hyper client with multi-chunked body (one per connection). Both HTTP/1 and HTTP/2.
 - **Hyper legacy** (`hyper-legacy`) — Legacy Hyper HTTP client (one per connection).
 - **Hyper RT1** (`hyper-rt1`) — Legacy Hyper HTTP client shared across a runtime.
 - **Hyper H2** (`hyper-h2`) — HTTP/2 client using Hyper with the h2 library (one per connection).
 - **Reqwest** (`reqwest`) — Popular Reqwest HTTP client (one per runtime).
 - **TokioUring** (`tokio-uring`) — HTTP client using tokio-uring for high-performance I/O (Linux only).
 - **Monoio** (`monoio`) — HTTP client using monoio for high-performance I/O (Linux only).
+- **Compio** (`compio`) — HTTP client using compio for high-performance I/O.
 - **Help** (`help`) — Print available client types and exit.
 
 ## Basic options
@@ -32,7 +33,7 @@ Plumbrs is a high-performance HTTP/HTTP2 request generator designed for benchmar
 
 - `-r, --requests <NUMBER>` — Maximum requests per worker. If omitted, runs until duration elapses.
 
-- `-C, --client <TYPE>` (default: `auto`) — Client type: `auto`, `hyper`, `hyper-mcp`, `hyper-chunked`, `hyper-h2`, `hyper-legacy`, `hyper-rt1`, `reqwest`, `tokio-uring`, `monoio`, or `help`.
+- `-C, --client <TYPE>` (default: `auto`) — Client type: `auto`, `hyper`, `hyper-mcp`, `hyper-chunked`, `hyper-h2`, `hyper-legacy`, `hyper-rt1`, `reqwest`, `tokio-uring`, `monoio`, `compio`, or `help`.
 
 - `--rpc <NUMBER>` — Requests per connection. After every N requests the connection is closed (`Connection: close` is sent on the last request) and a new one is opened. Use `--rpc 1` to measure Connections Per Second. By default, connections are reused indefinitely.
 
@@ -54,7 +55,7 @@ Plumbrs is a high-performance HTTP/HTTP2 request generator designed for benchmar
 
 - `-H, --header <KEY:VALUE>` — Add HTTP header (repeatable).
 
-- `-T, --trailer <KEY:VALUE>` — Add HTTP trailer (repeatable). Not available with `reqwest` client.
+- `-T, --trailer <KEY:VALUE>` — Add HTTP trailer (repeatable). Only supported with `hyper-chunked` or `hyper-h2` clients.
 
 - `-b, --body <BODY>` — Request body content. Can be specified multiple times for multi-chunk encoding, but multi-chunk is only supported with `hyper-chunked` client. Use `@path` to read the body from a file (streamed).
 
@@ -73,7 +74,7 @@ Two transport modes are supported:
 
 - `--mcp` — Enable MCP mode with **Streamable HTTP** transport (recommended). This is the newer transport where JSON-RPC requests and responses flow over standard HTTP POST requests. The server returns a session ID via the `Mcp-Session-Id` header.
 
-- `--mcp-sse` — Enable MCP mode with legacy **Server-Sent Events (SSE)** transport. This older transport uses a persistent SSE connection for receiving responses while sending requests via separate HTTP POST calls.
+- `--mcp-sse` — Enable MCP mode with legacy **Server-Sent Events (SSE)** transport (implies `--mcp`). This older transport uses a persistent SSE connection for receiving responses while sending requests via separate HTTP POST calls.
 
 - `--mcp-rand-string-len <NUMBER>` — Fix the length of random strings generated for `tools/call` arguments. If omitted, a random length between 5 and 20 is used each time.
 
@@ -95,7 +96,7 @@ plumbrs -c 10 -d 30 http://localhost:3001/sse --mcp-sse
 - `--http1-read-buf-exact-size <NUMBER>` — Exact read buffer size (unsets max-buf-size).
 - `--http1-writev <true|false>` — Use vectored writes (default: auto).
 - `--http1-title-case-headers` — Write header names as title case.
-- `--http1-preserve-header-case` — Preserve original header case. Not available with `hyper-legacy` or `hyper-rt1`.
+- `--http1-preserve-header-case` — Preserve original header case.
 - `--http1-max-headers <NUMBER>` — Maximum number of headers (default: 100).
 - `--http1-allow-spaces-after-header-name-in-responses` — Accept spaces after header names.
 - `--http1-allow-obsolete-multiline-headers-in-responses` — Accept obsolete line folding.
@@ -123,10 +124,10 @@ plumbrs -c 10 -d 30 http://localhost:3001/sse --mcp-sse
 
 ## io_uring options (Linux only)
 
-The `tokio-uring` and `monoio` clients support HTTP/1 only and do not support multi-threaded runtimes (`-m`).
+The `tokio-uring`, `monoio`, and `compio` clients support HTTP/1 only and do not support multi-threaded runtimes (`-m`).
 
 - `--uring-entries <NUMBER>` (default: `4096`) — Size of the io_uring Submission Queue.
-- `--uring-sqpoll <MILLISECONDS>` — Enable kernel-side submission polling with idle timeout.
+- `--uring-sqpoll <MILLISECONDS>` — Enable kernel-side submission polling with idle timeout in milliseconds.
 
 ## Examples
 

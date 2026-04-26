@@ -7,6 +7,8 @@ pub mod hyper_chunked;
 pub mod hyper_rt1;
 #[cfg(all(target_os = "linux", feature = "monoio"))]
 pub mod monoio;
+#[cfg(feature = "compio")]
+pub mod compio;
 pub mod reqwest;
 #[cfg(all(target_os = "linux", feature = "tokio_uring"))]
 pub mod tokio_uring;
@@ -28,6 +30,8 @@ pub enum ClientType {
     TokioUring,
     #[cfg(all(target_os = "linux", feature = "monoio"))]
     Monoio,
+    #[cfg(feature = "compio")]
+    Compio,
     Help,
 }
 
@@ -47,6 +51,8 @@ impl std::fmt::Display for ClientType {
             ClientType::TokioUring => write!(f, "tokio-uring"),
             #[cfg(all(target_os = "linux", feature = "monoio"))]
             ClientType::Monoio => write!(f, "monoio"),
+            #[cfg(feature = "compio")]
+            ClientType::Compio => write!(f, "compio"),
             ClientType::Help => write!(f, "help"),
         }
     }

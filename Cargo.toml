@@ -38,10 +38,12 @@ http_wire = "0.7.0"
 ctor = "0.6.3"
 const_format = "0.2.35"
 quanta = "0.12.6"
+compio = { version = "0.18.0", optional = true, features = ["io", "net", "macros", "runtime"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tokio-uring = { version = "0.5.0", optional = true }
 monoio = { version = "0.2.4", optional = true, features = ["sync"] }
+
 io-uring = { version = "0.6.4", optional = true }
 
 [dependencies.mimalloc]
@@ -55,6 +57,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tokio_unstable)'] }
 default = ["mimalloc"]
 tokio_uring = ["dep:tokio-uring"]
 monoio = ["dep:monoio", "dep:io-uring"]
+compio = ["dep:compio"]
 mcp = ["dep:rmcp"]
 
 [profile.release]

@@ -9,6 +9,8 @@ use crate::client::hyper_chunked::http_hyper_chunked;
 use crate::client::hyper_rt1::{RequestBody, http_hyper_rt1};
 #[cfg(all(target_os = "linux", feature = "monoio"))]
 use crate::client::monoio::*;
+#[cfg(feature = "compio")]
+use crate::client::compio::*;
 use crate::client::reqwest::*;
 #[cfg(all(target_os = "linux", feature = "tokio_uring"))]
 use crate::client::tokio_uring::*;
@@ -101,6 +103,10 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
             #[cfg(all(target_os = "linux", feature = "monoio"))]
             if matches!(opts.client_type, ClientType::Monoio) {
                 return monoio_thread(id, opts, stats);
+            }
+            #[cfg(feature = "compio")]
+            if matches!(opts.client_type, ClientType::Compio) {
+                return compio_thread(id, opts, stats);
             }
             tokio_thread(id, opts, stats)
         });
@@ -500,6 +506,42 @@ fn monoio_thread(
     Ok((stats, metrics))
 }
 
+#[cfg(feature = "compio")]
+fn compio_thread(
+    id: usize,
+    opts: Options,
+    rt_stats: Arc<Vec<RealtimeStats>>,
+) -> Result<(Statistics, Metrics)> {
+    let metrics = Metrics::default();
+    let opts = Arc::new(opts);
+
+    let stats = compio::runtime::Runtime::new()
+        .expect("Failed to build compio runtime")
+        .block_on(async move {
+            let mut tasks = Vec::new();
+
+            for con in 0..opts.connections {
+                let opts_clone = Arc::clone(&opts);
+                let stats_clone = Arc::clone(&rt_stats);
+
+                tasks.push(compio::runtime::spawn(async move {
+                    http_compio(id, con, opts_clone, &stats_clone[id]).await
+                }));
+            }
+
+            let mut statistics = Statistics::default();
+            for task in tasks {
+                match task.await {
+                    s => statistics = statistics + s.unwrap(),
+                }
+            }
+
+            statistics
+        });
+
+    Ok((stats, metrics))
+}
+
 async fn spawn_tasks(
     id: usize,
     opts: Arc<Options>,
@@ -573,6 +615,10 @@ async fn spawn_tasks(
             #[cfg(all(target_os = "linux", feature = "monoio"))]
             ClientType::Monoio => {
                 // Monoio tasks are spawned in monoio_thread, not here
+            }
+            #[cfg(feature = "compio")]
+            ClientType::Compio => {
+                // Compio tasks are spawned in compio_thread, not here
             }
             ClientType::Help => (),
         }
