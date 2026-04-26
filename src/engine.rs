@@ -515,7 +515,28 @@ fn compio_thread(
     let metrics = Metrics::default();
     let opts = Arc::new(opts);
 
-    let stats = compio::runtime::Runtime::new()
+    let mut proactor_builder = compio::driver::ProactorBuilder::new();
+
+    #[cfg(target_os = "linux")]
+    {
+        let num_entries = opts.uring_entries.next_power_of_two();
+        proactor_builder.capacity(num_entries);
+
+        if let Some(idle) = opts.uring_sqpoll {
+            proactor_builder.sqpoll_idle(std::time::Duration::from_millis(idle as u64));
+        } else {
+            proactor_builder.coop_taskrun(true).taskrun_flag(true);
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        proactor_builder.capacity(4096);
+    }
+
+    let stats = compio::runtime::Runtime::builder()
+        .with_proactor(proactor_builder)
+        .build()
         .expect("Failed to build compio runtime")
         .block_on(async move {
             let mut tasks = Vec::new();
