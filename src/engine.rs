@@ -44,7 +44,7 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
     let instances = opts.threads / opts.multithreaded.unwrap_or(1);
 
     println!(
-        "{} {} tokio runtime{} started ({} total connections, {} per thread)",
+        "{} {} runtime{} started ({} total connections, {} per thread)",
         instances,
         match opts.multithreaded {
             None => "single-threaded".to_string(),
