@@ -178,7 +178,10 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
 
             let mut req_headers = headers.clone();
             if is_last {
-                req_headers.insert(header::CONNECTION, header::HeaderValue::from_static("close"));
+                req_headers.insert(
+                    header::CONNECTION,
+                    header::HeaderValue::from_static("close"),
+                );
             }
 
             let mut req = Request::new(body);
@@ -908,10 +911,10 @@ where
         .enumerate()
         .map(|(idx, tool)| {
             let call_params = if let Some(args) = create_tool_request(&tool.input_schema, opts) {
-                 CallToolRequestParams::new(tool.name.clone()).with_arguments(args)
-             } else {
-                 CallToolRequestParams::new(tool.name.clone())
-             };
+                CallToolRequestParams::new(tool.name.clone()).with_arguments(args)
+            } else {
+                CallToolRequestParams::new(tool.name.clone())
+            };
 
             let call_request = CallToolRequest::new(call_params);
 

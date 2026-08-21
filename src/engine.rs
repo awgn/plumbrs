@@ -1,16 +1,16 @@
 use crate::Options;
 use crate::client::ClientType;
+#[cfg(feature = "compio")]
+use crate::client::compio::*;
 use crate::client::hyper::*;
+use crate::client::hyper_chunked::http_hyper_chunked;
 use crate::client::hyper_h2::*;
 use crate::client::hyper_legacy::*;
 #[cfg(feature = "mcp")]
 use crate::client::hyper_mcp::http_hyper_mcp;
-use crate::client::hyper_chunked::http_hyper_chunked;
 use crate::client::hyper_rt1::{RequestBody, http_hyper_rt1};
 #[cfg(all(target_os = "linux", feature = "monoio"))]
 use crate::client::monoio::*;
-#[cfg(feature = "compio")]
-use crate::client::compio::*;
 use crate::client::reqwest::*;
 #[cfg(all(target_os = "linux", feature = "tokio_uring"))]
 use crate::client::tokio_uring::*;
@@ -584,9 +584,7 @@ async fn spawn_tasks(
         match opts.client_type {
             ClientType::Auto => {
                 if opts.body.len() > 1 {
-                    tasks.spawn(
-                        async move { http_hyper_chunked(id, con, opts, &stats[id]).await },
-                    );
+                    tasks.spawn(async move { http_hyper_chunked(id, con, opts, &stats[id]).await });
                 } else {
                     #[cfg(feature = "mcp")]
                     {

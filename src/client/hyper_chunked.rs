@@ -1,7 +1,7 @@
 use crate::Options;
+use crate::stats::{RealtimeStats, Statistics};
 use http::header;
 use http::header::HeaderValue;
-use crate::stats::{RealtimeStats, Statistics};
 
 use std::collections::HashSet;
 use std::sync::Arc;

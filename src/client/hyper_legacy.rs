@@ -2,8 +2,8 @@ use crate::stats::{RealtimeStats, Statistics};
 use crate::{Options, fatal};
 
 use bytes::Bytes;
-use http::{Request, header};
 use http::header::HeaderValue;
+use http::{Request, header};
 use http_body_util::{BodyExt, Either, Full};
 use hyper::StatusCode;
 use std::collections::HashSet;

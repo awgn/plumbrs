@@ -1,8 +1,8 @@
 use crate::stats::{RealtimeStats, Statistics};
 use crate::{Options, fatal};
 
-use http::{HeaderMap, StatusCode, header};
 use http::header::HeaderValue;
+use http::{HeaderMap, StatusCode, header};
 
 use crate::client::utils::{build_headers, should_stop};
 use reqwest::{Client, ClientBuilder, Request, Result, Url};

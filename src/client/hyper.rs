@@ -6,8 +6,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use bytes::Bytes;
-use http::{Request, StatusCode, header};
 use http::header::HeaderValue;
+use http::{Request, StatusCode, header};
 
 use crate::client::utils::*;
 use crate::fatal;

@@ -1,11 +1,11 @@
 use std::{collections::HashSet, sync::Arc, time::Instant};
 
 use bytes::Bytes;
+use compio::io::{AsyncRead, AsyncWriteExt};
+use compio::net::TcpStream;
 use http::{Request, StatusCode};
 use http_body_util::{BodyExt, Either, Full};
 use http_wire::{WireDecode, WireEncode, response::FullResponse};
-use compio::io::{AsyncRead, AsyncWriteExt};
-use compio::net::TcpStream;
 
 use crate::{
     client::utils::{

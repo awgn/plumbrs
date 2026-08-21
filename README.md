@@ -14,9 +14,9 @@ Plumbrs is a high-performance HTTP/HTTP2 request generator designed for benchmar
 - **Hyper RT1** (`hyper-rt1`) — Legacy Hyper HTTP client shared across a runtime.
 - **Hyper H2** (`hyper-h2`) — HTTP/2 client using Hyper with the h2 library (one per connection).
 - **Reqwest** (`reqwest`) — Popular Reqwest HTTP client (one per runtime).
-- **TokioUring** (`tokio-uring`) — HTTP client using tokio-uring for high-performance I/O (Linux only).
-- **Monoio** (`monoio`) — HTTP client using monoio for high-performance I/O (Linux only).
-- **Compio** (`compio`) — HTTP client using compio for high-performance I/O.
+- **TokioUring** (`tokio-uring`) — HTTP client using tokio-uring for high-performance I/O (Linux only, requires `tokio_uring` feature).
+- **Monoio** (`monoio`) — HTTP client using monoio for high-performance I/O (Linux only, requires `monoio` feature).
+- **Compio** (`compio`) — HTTP client using compio for high-performance I/O (requires `compio` feature).
 - **Help** (`help`) — Print available client types and exit.
 
 ## Basic options
@@ -59,7 +59,7 @@ Plumbrs is a high-performance HTTP/HTTP2 request generator designed for benchmar
 
 - `-b, --body <BODY>` — Request body content. Can be specified multiple times for multi-chunk encoding, but multi-chunk is only supported with `hyper-chunked` client. Use `@path` to read the body from a file (streamed).
 
-- `--http2` — Use HTTP/2 only. Not available with `tokio-uring` or `monoio` clients.
+- `--http2` — Use HTTP/2 only. Not available with `tokio-uring`, `monoio`, or `compio` clients.
 
 ## MCP options (requires `mcp` feature)
 

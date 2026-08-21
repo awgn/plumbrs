@@ -111,8 +111,12 @@ fn check_options(opts: &mut Options) -> Result<()> {
             println!(
                 "  hyper             - Hyper client, one per connection. Both HTTP/1 and HTTP/2"
             );
+            #[cfg(feature = "mcp")]
             println!(
-                "  hyper-chunked  - Hyper client, one per connection, with multi-chunked body. Both HTTP/1 and HTTP/2"
+                "  hyper-mcp         - Hyper client for MCP servers, one per connection. Both HTTP/1 and HTTP/2"
+            );
+            println!(
+                "  hyper-chunked     - Hyper client, one per connection, with multi-chunked body. Both HTTP/1 and HTTP/2"
             );
             println!(
                 "  hyper-h2          - Hyper client, one per connection. Use h2 package, HTTP/2 only"
@@ -126,8 +130,12 @@ fn check_options(opts: &mut Options) -> Result<()> {
             println!(
                 "  reqwest           - Reqwest client, one per runtime. Both HTTP/1 and HTTP/2"
             );
+            #[cfg(all(target_os = "linux", feature = "tokio_uring"))]
             println!("  tokio-uring       - Tokio-uring client, one per thread. Only HTTP/1");
+            #[cfg(all(target_os = "linux", feature = "monoio"))]
             println!("  monoio            - Monoio client, one per thread. Only HTTP/1");
+            #[cfg(feature = "compio")]
+            println!("  compio            - Compio client, one per thread. Only HTTP/1");
             std::process::exit(0);
         }
         _ => (),

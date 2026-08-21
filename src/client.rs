@@ -1,14 +1,14 @@
+#[cfg(feature = "compio")]
+pub mod compio;
 pub mod hyper;
+pub mod hyper_chunked;
 pub mod hyper_h2;
 pub mod hyper_legacy;
 #[cfg(feature = "mcp")]
 pub mod hyper_mcp;
-pub mod hyper_chunked;
 pub mod hyper_rt1;
 #[cfg(all(target_os = "linux", feature = "monoio"))]
 pub mod monoio;
-#[cfg(feature = "compio")]
-pub mod compio;
 pub mod reqwest;
 #[cfg(all(target_os = "linux", feature = "tokio_uring"))]
 pub mod tokio_uring;
