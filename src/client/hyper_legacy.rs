@@ -48,7 +48,7 @@ pub async fn http_hyper_legacy(
 
         if cid < opts.uri.len() && !banner.contains(uri_str) {
             banner.insert(uri_str.to_owned());
-            println!(
+            eprintln!(
                 "hyper-legacy [{tid:>2}] -> connecting. {} {} {}...",
                 opts.method.as_ref().unwrap_or(&http::Method::GET),
                 uri,

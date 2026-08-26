@@ -55,7 +55,7 @@ pub async fn http_hyper_h2(
 
         if cid < opts.uri.len() && !banner.contains(uri_str) {
             banner.insert(uri_str.to_owned());
-            println!(
+            eprintln!(
                 "hyper-h2 [{tid:>2}] -> connecting to {}:{}, method = {} uri = {} HTTP2...",
                 host,
                 port,

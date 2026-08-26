@@ -49,6 +49,10 @@ Plumbrs is a high-performance HTTP/HTTP2 request generator designed for benchmar
 
 - `--metrics` — Display Tokio runtime metrics at the end.
 
+- `--stats-csv` — Print complete end-of-run statistics as a CSV row (no header).
+
+- `--stats-csv-header` — Same as `--stats-csv`, but also print the CSV header.
+
 ## HTTP options
 
 - `-M, --method <METHOD>` — HTTP method (e.g., `GET`, `POST`, `PUT`, `DELETE`). If omitted, defaults to `GET` when no body is provided, or `POST` when a body is specified. Note: `TRACE` method cannot have a body.

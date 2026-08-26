@@ -38,6 +38,18 @@ pub struct Options {
     )]
     pub metrics: bool,
     #[arg(
+        help = "Print complete statistics as a CSV row (no header)",
+        long = "stats-csv",
+        default_value_t = false
+    )]
+    pub stats_csv: bool,
+    #[arg(
+        help = "Print complete statistics as CSV, including the header row",
+        long = "stats-csv-header",
+        default_value_t = false
+    )]
+    pub stats_csv_header: bool,
+    #[arg(
         help = "Concurrent number of connections or HTTP2 streams",
         short = 'c',
         long = "concurrency",
@@ -216,6 +228,19 @@ pub struct Options {
 }
 
 impl Options {
+    pub fn body_size(&self) -> u64 {
+        self.body
+            .iter()
+            .map(|b| {
+                if let Some(path) = b.strip_prefix('@') {
+                    std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+                } else {
+                    b.len() as u64
+                }
+            })
+            .sum()
+    }
+
     pub fn bodies(&self) -> Result<Vec<Bytes>> {
         let mut bodies = Vec::new();
         for body in self.body.iter() {

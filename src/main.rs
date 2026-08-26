@@ -22,12 +22,12 @@ static GLOBAL: MiMalloc = MiMalloc;
 
 #[dtor]
 fn cleanup() {
-    _ = execute!(std::io::stdout(), cursor::Show);
+    _ = execute!(std::io::stderr(), cursor::Show);
 }
 
 fn main() -> Result<()> {
     // Hide cursor and ensure it's restored on exit
-    _ = execute!(std::io::stdout(), cursor::Hide);
+    _ = execute!(std::io::stderr(), cursor::Hide);
 
     #[cfg(feature = "mimalloc")]
     eprintln!("using allocator: mimalloc");
@@ -90,7 +90,7 @@ fn check_options(opts: &mut Options) -> Result<()> {
         }
         #[cfg(all(target_os = "linux", feature = "tokio_uring"))]
         ClientType::TokioUring if opts.uri.is_empty() => {
-            println!("Missing URI. Try --help");
+            eprintln!("Missing URI. Try --help");
             std::process::exit(1);
         }
         ClientType::Auto
@@ -100,7 +100,7 @@ fn check_options(opts: &mut Options) -> Result<()> {
         | ClientType::HyperH2
             if opts.uri.is_empty() =>
         {
-            println!("Missing URI. Try --help");
+            eprintln!("Missing URI. Try --help");
             std::process::exit(1);
         }
         ClientType::HyperLegacy | ClientType::HyperRt1 if opts.host.is_some() => {

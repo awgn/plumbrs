@@ -61,7 +61,7 @@ pub async fn http_hyper_rt1(
 
         if cid < opts.uri.len() && !banner.contains(uri_str) {
             banner.insert(uri_str.to_owned());
-            println!(
+            eprintln!(
                 "hyper-rt1 [{tid:>2}] -> connecting. {} {} {}...",
                 opts.method.as_ref().unwrap_or(&http::Method::GET),
                 uri,

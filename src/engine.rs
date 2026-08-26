@@ -43,7 +43,7 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
     let mut handles: Vec<_> = Vec::with_capacity(opts.threads);
     let instances = opts.threads / opts.multithreaded.unwrap_or(1);
 
-    println!(
+    eprintln!(
         "{} {} runtime{} started ({} total connections, {} per thread)",
         instances,
         match opts.multithreaded {
@@ -73,8 +73,8 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
         let ctrl_c_handle = tokio::spawn(async move {
             tokio::signal::ctrl_c().await.ok();
             // Restore cursor on Ctrl+C
-            let _ = execute!(std::io::stdout(), cursor::Show);
-            println!();
+            let _ = execute!(std::io::stderr(), cursor::Show);
+            eprintln!();
             std::process::exit(0);
         });
 
@@ -127,7 +127,7 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
     );
 
     let total = total_stats;
-    print_results(&total, duration, opts.threads, opts.metrics, &total_metrics);
+    print_results(&total, duration, &opts, &total_metrics);
     Ok(())
 }
 
@@ -141,31 +141,93 @@ fn pretty_lat(l: f64) -> String {
     }
 }
 
-fn print_results(
-    total: &Statistics,
-    duration: u64,
-    threads: usize,
-    show_metrics: bool,
-    total_metrics: &Metrics,
-) {
-    println!();
+const STATS_CSV_HEADER: &str = "threads,connections,duration,method,body_size,rpc,http2,conn,ok,1xx,2xx,3xx,4xx,5xx,err,idle_pct,rps,latency_p50,latency_p75,latency_p90,latency_p99,latency_min,latency_mean,latency_max";
 
-    // Summary table
-    print_summary(total, threads);
+fn print_results(total: &Statistics, duration: u64, opts: &Options, total_metrics: &Metrics) {
+    eprintln!();
 
-    // Stats table
-    print_stats(total, duration);
+    if opts.stats_csv || opts.stats_csv_header {
+        print_stats_csv(total, duration, opts);
+    } else {
+        print_summary(total, opts.threads);
+        print_stats(total, duration);
+        print_errors(total, duration);
+        print_latency(total);
+    }
 
-    // Errors table
-    print_errors(total, duration);
-
-    // Latency table
-    print_latency(total);
-
-    // Display metrics if enabled
-    if show_metrics {
+    if opts.metrics {
         total_metrics.display();
     }
+}
+
+fn print_stats_csv(total: &Statistics, duration: u64, opts: &Options) {
+    if opts.stats_csv_header {
+        println!("{STATS_CSV_HEADER}");
+    }
+
+    let duration_opt = opts
+        .duration
+        .map(|d| d.as_secs().to_string())
+        .unwrap_or_default();
+    let method = opts
+        .method
+        .as_ref()
+        .map(|m| m.as_str().to_string())
+        .unwrap_or_default();
+    let rpc = if opts.rpc == u32::MAX {
+        "unlimited".to_string()
+    } else {
+        opts.rpc.to_string()
+    };
+    let http2 = if opts.http2 { "yes" } else { "no" };
+    let idle_pct = total.idle() / (opts.threads as f64) * 100.0;
+    let responses = total.ok() + total.http_status().values().sum::<u64>();
+    let rps = if duration > 0 {
+        responses * 1_000_000 / duration
+    } else {
+        0
+    };
+
+    let (p50, p75, p90, p99, min, mean, max) = match &total.latency {
+        Some(lat) => (
+            lat.value_at_quantile(0.50).to_string(),
+            lat.value_at_quantile(0.75).to_string(),
+            lat.value_at_quantile(0.90).to_string(),
+            lat.value_at_quantile(0.99).to_string(),
+            lat.min().to_string(),
+            format!("{:.2}", lat.mean()),
+            lat.max().to_string(),
+        ),
+        None => Default::default(),
+    };
+
+    println!(
+        "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.2},{},{},{},{},{},{},{},{}",
+        opts.threads,
+        opts.connections,
+        duration_opt,
+        method,
+        opts.body_size(),
+        rpc,
+        http2,
+        total.conn(),
+        total.ok(),
+        total.status_1xx(),
+        total.status_2xx(),
+        total.status_3xx(),
+        total.status_4xx(),
+        total.status_5xx(),
+        total.errors(),
+        idle_pct,
+        rps,
+        p50,
+        p75,
+        p90,
+        p99,
+        min,
+        mean,
+        max,
+    );
 }
 
 fn print_summary(total: &Statistics, threads: usize) {
@@ -673,12 +735,12 @@ pub async fn meter(rt_stats: Arc<Vec<RealtimeStats>>) {
             total_fail += stats.fail.swap(0, Ordering::Relaxed);
         }
 
-        print!(
+        eprint!(
             "\r{} Stats: ok: {total_ok}/sec, fail: {total_fail}/sec, err: {total_err}/sec",
             SPINNER[spinner_idx]
         );
         let _ = execute!(
-            std::io::stdout(),
+            std::io::stderr(),
             terminal::Clear(terminal::ClearType::UntilNewLine)
         );
 

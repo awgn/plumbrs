@@ -79,7 +79,7 @@ pub async fn http_compio(
 
         if cid < opts.uri.len() && !banner.contains(uri_str) {
             banner.insert(uri_str.to_owned());
-            println!(
+            eprintln!(
                 "compio [{tid:>2}] -> connecting to {}:{}, method = {} uri = {} ...",
                 host,
                 port,

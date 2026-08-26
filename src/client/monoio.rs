@@ -79,7 +79,7 @@ pub async fn http_monoio(
 
         if cid < opts.uri.len() && !banner.contains(uri_str) {
             banner.insert(uri_str.to_owned());
-            println!(
+            eprintln!(
                 "monoio [{tid:>2}] -> connecting to {}:{}, method = {} uri = {} ...",
                 host,
                 port,

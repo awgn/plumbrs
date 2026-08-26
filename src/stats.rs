@@ -125,30 +125,37 @@ impl Statistics {
     }
 
     #[inline]
+    pub fn status_1xx(&self) -> u64 {
+        self.status_class(100..200)
+    }
+
+    #[inline]
+    pub fn status_2xx(&self) -> u64 {
+        self.ok + self.status_class(200..300)
+    }
+
+    #[inline]
     pub fn status_3xx(&self) -> u64 {
+        self.status_class(300..400)
+    }
+
+    #[inline]
+    fn status_class(&self, range: std::ops::Range<u16>) -> u64 {
         self.status
             .iter()
-            .filter(|(code, _)| (300..400).contains(*code))
+            .filter(|(code, _)| range.contains(*code))
             .map(|(_, &count)| count)
             .sum()
     }
 
     #[inline]
     pub fn status_4xx(&self) -> u64 {
-        self.status
-            .iter()
-            .filter(|(code, _)| (400..500).contains(*code))
-            .map(|(_, &count)| count)
-            .sum()
+        self.status_class(400..500)
     }
 
     #[inline]
     pub fn status_5xx(&self) -> u64 {
-        self.status
-            .iter()
-            .filter(|(code, _)| (500..600).contains(*code))
-            .map(|(_, &count)| count)
-            .sum()
+        self.status_class(500..600)
     }
 }
 

@@ -124,7 +124,7 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
 
         if cid < opts.uri.len() && !banner.contains(uri_str) {
             banner.insert(uri_str.to_owned());
-            println!(
+            eprintln!(
                 "hyper-mcp [{tid:>2}] -> connecting to {}:{}, method = POST uri = {} {} (transport {transport})...",
                 host,
                 port,

@@ -61,7 +61,7 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
 
         if cid < opts.uri.len() && !banner.contains(uri_str) {
             banner.insert(uri_str.to_owned());
-            println!(
+            eprintln!(
                 "hyper-chunked [{tid:>2}] -> connecting to {}:{}, method = {} uri = {} {}...",
                 host,
                 port,

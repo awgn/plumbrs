@@ -271,95 +271,95 @@ impl Metrics {
 
     /// Display metrics in a human-readable format
     pub fn display(&self) {
-        println!(" Runtime Configuration:");
-        println!("   Workers:              {:>10}", self.num_workers);
-        println!("   Alive Tasks:          {:>10}", self.num_alive_tasks);
-        println!("   Global Queue Depth:   {:>10}", self.global_queue_depth);
-        println!("─────────────────────────────────────────────────────────────────────");
+        eprintln!(" Runtime Configuration:");
+        eprintln!("   Workers:              {:>10}", self.num_workers);
+        eprintln!("   Alive Tasks:          {:>10}", self.num_alive_tasks);
+        eprintln!("   Global Queue Depth:   {:>10}", self.global_queue_depth);
+        eprintln!("─────────────────────────────────────────────────────────────────────");
 
         #[cfg(target_has_atomic = "64")]
         {
-            println!(" Worker Metrics:");
-            println!(
+            eprintln!(" Worker Metrics:");
+            eprintln!(
                 "   Total Busy Duration:  {:>10.3}s",
                 self.worker_total_busy_duration.as_secs_f64()
             );
-            println!("   Park Count:           {:>10}", self.worker_park_count);
-            println!(
+            eprintln!("   Park Count:           {:>10}", self.worker_park_count);
+            eprintln!(
                 "   Park/Unpark Count:    {:>10}",
                 self.worker_park_unpark_count
             );
-            println!("─────────────────────────────────────────────────────────────────────");
+            eprintln!("─────────────────────────────────────────────────────────────────────");
         }
 
         #[cfg(all(tokio_unstable, target_has_atomic = "64"))]
         {
-            println!(" Task Metrics:");
-            println!("   Spawned Tasks:        {:>10}", self.spawned_tasks_count);
-            println!(
+            eprintln!(" Task Metrics:");
+            eprintln!("   Spawned Tasks:        {:>10}", self.spawned_tasks_count);
+            eprintln!(
                 "   Budget Forced Yields: {:>10}",
                 self.budget_forced_yield_count
             );
-            println!("─────────────────────────────────────────────────────────────────────");
+            eprintln!("─────────────────────────────────────────────────────────────────────");
 
-            println!(" Scheduling Metrics:");
-            println!("   No-op Count:          {:>10}", self.worker_noop_count);
-            println!("   Poll Count:           {:>10}", self.worker_poll_count);
-            println!(
+            eprintln!(" Scheduling Metrics:");
+            eprintln!("   No-op Count:          {:>10}", self.worker_noop_count);
+            eprintln!("   Poll Count:           {:>10}", self.worker_poll_count);
+            eprintln!(
                 "   Local Schedule Count: {:>10}",
                 self.worker_local_schedule_count
             );
-            println!(
+            eprintln!(
                 "   Overflow Count:       {:>10}",
                 self.worker_overflow_count
             );
-            println!("─────────────────────────────────────────────────────────────────────");
+            eprintln!("─────────────────────────────────────────────────────────────────────");
 
-            println!(" Work Stealing Metrics:");
-            println!("   Steal Count:          {:>10}", self.worker_steal_count);
-            println!(
+            eprintln!(" Work Stealing Metrics:");
+            eprintln!("   Steal Count:          {:>10}", self.worker_steal_count);
+            eprintln!(
                 "   Steal Operations:     {:>10}",
                 self.worker_steal_operations
             );
             if self.worker_steal_operations > 0 {
                 let avg_steals =
                     self.worker_steal_count as f64 / self.worker_steal_operations as f64;
-                println!("   Avg Tasks/Steal:      {:>10.2}", avg_steals);
+                eprintln!("   Avg Tasks/Steal:      {:>10.2}", avg_steals);
             }
-            println!("─────────────────────────────────────────────────────────────────────");
+            eprintln!("─────────────────────────────────────────────────────────────────────");
 
-            println!(" I/O Driver Metrics:");
-            println!(
+            eprintln!(" I/O Driver Metrics:");
+            eprintln!(
                 "   FDs Registered:       {:>10}",
                 self.io_driver_fd_registered_count
             );
-            println!(
+            eprintln!(
                 "   FDs Deregistered:     {:>10}",
                 self.io_driver_fd_deregistered_count
             );
             let active_fds = self
                 .io_driver_fd_registered_count
                 .saturating_sub(self.io_driver_fd_deregistered_count);
-            println!("   Active FDs:           {:>10}", active_fds);
-            println!(
+            eprintln!("   Active FDs:           {:>10}", active_fds);
+            eprintln!(
                 "   Ready Events:         {:>10}",
                 self.io_driver_ready_count
             );
-            println!("─────────────────────────────────────────────────────────────────────");
+            eprintln!("─────────────────────────────────────────────────────────────────────");
         }
 
         #[cfg(tokio_unstable)]
         {
-            println!(" Worker Queue Metrics:");
-            println!(
+            eprintln!(" Worker Queue Metrics:");
+            eprintln!(
                 "   Local Queue Depth:    {:>10}",
                 self.worker_local_queue_depth
             );
-            println!(
+            eprintln!(
                 "   Mean Poll Time:       {:>10.3}µs",
                 self.worker_mean_poll_time.as_micros()
             );
-            println!("─────────────────────────────────────────────────────────────────────");
+            eprintln!("─────────────────────────────────────────────────────────────────────");
         }
     }
 }
