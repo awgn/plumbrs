@@ -106,6 +106,9 @@ fn check_options(opts: &mut Options) -> Result<()> {
         ClientType::HyperLegacy | ClientType::HyperRt1 if opts.host.is_some() => {
             return Err(anyhow!("Host option not available with this client!"));
         }
+        ClientType::Reqwest if opts.sni.is_some() => {
+            return Err(anyhow!("SNI option not available with reqwest client!"));
+        }
         ClientType::Help => {
             println!("Available client types:");
             println!(
@@ -168,6 +171,12 @@ fn check_options(opts: &mut Options) -> Result<()> {
             ));
         }
         crate::client::tls::init(opts.insecure);
+    } else if opts.sni.is_some() {
+        return Err(anyhow!("--sni requires an https:// URI"));
+    }
+
+    if opts.sni.as_ref().is_some_and(|s| s.is_empty()) {
+        return Err(anyhow!("SNI server name cannot be empty"));
     }
 
     if let Some(nt) = opts.multithreaded

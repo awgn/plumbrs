@@ -228,6 +228,8 @@ pub struct Options {
     pub host: Option<String>,
     #[arg(help = "Set the port to connect to (e.g. 8080)", long = "port")]
     pub port: Option<u16>,
+    #[arg(help = "Set the TLS SNI server name", long = "sni")]
+    pub sni: Option<String>,
 
     #[arg(help = "HTTP/HTTPS URIs used in the request (e.g. http://192.168.0.1:80)")]
     pub uri: Vec<String>,

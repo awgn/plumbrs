@@ -34,7 +34,7 @@ pub async fn http_hyper_h2(
     let (host, port) =
         get_conn_address(&opts, &uri).unwrap_or_else(|| fatal!(1, "no host specified in uri"));
     let endpoint = build_conn_endpoint(&host, port);
-    let tls_name = tls_server_name(&uri);
+    let tls_name = tls_server_name(&opts, &uri);
 
     let bodies: Vec<Bytes> = opts
         .bodies()

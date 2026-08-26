@@ -116,9 +116,9 @@ pub fn get_conn_address(opts: &Options, uri: &hyper::Uri) -> Option<(String, u16
 }
 
 #[inline]
-pub fn tls_server_name(uri: &http::Uri) -> Option<&str> {
+pub fn tls_server_name<'a>(opts: &'a Options, uri: &'a http::Uri) -> Option<&'a str> {
     match uri.scheme_str() {
-        Some("https") => uri.host(),
+        Some("https") => opts.sni.as_deref().or_else(|| uri.host()),
         _ => None,
     }
 }

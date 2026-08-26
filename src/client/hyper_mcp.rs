@@ -135,7 +135,7 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
 
         let (mut sender, mut conn_task) = match B::build_connection(
             endpoint,
-            tls_server_name(&uri),
+            tls_server_name(opts, &uri),
             &mut statistics,
             rt_stats,
             &opts,
@@ -692,7 +692,7 @@ where
     let (host, port) =
         get_conn_address(opts, &base_uri).unwrap_or_else(|| fatal!(3, "no host in uri"));
     let endpoint: &'static str = build_conn_endpoint(&host, port);
-    let tls_name = tls_server_name(&base_uri);
+    let tls_name = tls_server_name(opts, &base_uri);
 
     // Create dummy stats for connection building
     let mut stats = Statistics::new(false);

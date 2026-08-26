@@ -73,7 +73,7 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
 
         let (mut sender, mut conn_task) = match B::build_connection(
             endpoint,
-            tls_server_name(&uri),
+            tls_server_name(&opts, &uri),
             &mut statistics,
             rt_stats,
             &opts,
@@ -155,7 +155,7 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
                 conn_task.abort();
                 (sender, conn_task) = match B::build_connection(
                     endpoint,
-                    tls_server_name(&uri),
+                    tls_server_name(&opts, &uri),
                     &mut statistics,
                     rt_stats,
                     &opts,
