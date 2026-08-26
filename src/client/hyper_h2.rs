@@ -11,8 +11,8 @@ use std::time::Instant;
 
 use http::Request;
 use http::StatusCode;
-use tokio::net::TcpStream;
 
+use crate::client::tls::MaybeTlsStream;
 use crate::client::utils::*;
 
 use h2;
@@ -34,6 +34,7 @@ pub async fn http_hyper_h2(
     let (host, port) =
         get_conn_address(&opts, &uri).unwrap_or_else(|| fatal!(1, "no host specified in uri"));
     let endpoint = build_conn_endpoint(&host, port);
+    let tls_name = tls_server_name(&uri);
 
     let bodies: Vec<Bytes> = opts
         .bodies()
@@ -64,53 +65,14 @@ pub async fn http_hyper_h2(
             );
         }
 
-        let stream_res = TcpStream::connect(endpoint)
-            .await
-            .and_then(|s| s.set_nodelay(true).map(|_| s));
-        let mut stream = match stream_res {
-            Ok(s) => s,
-            Err(ref err) => {
-                statistics.set_error(err, rt_stats);
-                total += 1;
-                continue 'connection;
-            }
-        };
-
-        let mut h2_builder = h2::client::Builder::new();
-
-        // Configure HTTP/2 options
-        // Note: h2 doesn't have adaptive_window option, only hyper does
-        if let Some(v) = opts.http2_initial_max_send_streams {
-            h2_builder.initial_max_send_streams(v);
-        }
-        if let Some(v) = opts.http2_max_concurrent_reset_streams {
-            h2_builder.max_concurrent_reset_streams(v);
-        }
-        if let Some(v) = opts.http2_initial_stream_window_size {
-            h2_builder.initial_window_size(v);
-        }
-        if let Some(v) = opts.http2_initial_connection_window_size {
-            h2_builder.initial_connection_window_size(v);
-        }
-        if let Some(v) = opts.http2_max_frame_size {
-            h2_builder.max_frame_size(v);
-        }
-        if let Some(v) = opts.http2_max_header_list_size {
-            h2_builder.max_header_list_size(v);
-        }
-        if let Some(v) = opts.http2_max_send_buffer_size {
-            h2_builder.max_send_buffer_size(v);
-        }
-
-        let conn = h2_builder.handshake::<_, bytes::Bytes>(stream).await;
-        let (mut h2_client, mut connection) = match conn {
-            Ok(h2_conn) => h2_conn,
-            Err(ref err) => {
-                statistics.set_error(err, rt_stats);
-                total += 1;
-                continue 'connection;
-            }
-        };
+        let (mut h2_client, connection) =
+            match h2_connect(endpoint, tls_name, &opts, &mut statistics, rt_stats).await {
+                Some(p) => p,
+                None => {
+                    total += 1;
+                    continue 'connection;
+                }
+            };
 
         tokio::task::spawn(async move {
             if let Err(err) = connection.await {
@@ -204,52 +166,15 @@ pub async fn http_hyper_h2(
             }
 
             if is_last {
-                let stream_res = TcpStream::connect(endpoint)
-                    .await
-                    .and_then(|s| s.set_nodelay(true).map(|_| s));
-                stream = match stream_res {
-                    Ok(s) => s,
-                    Err(ref err) => {
-                        statistics.set_error(err, rt_stats);
-                        total += 1;
-                        continue 'connection;
-                    }
-                };
-                let mut h2_builder = h2::client::Builder::new();
-
-                // Configure HTTP/2 options
-                // Note: h2 doesn't have adaptive_window option, only hyper does
-                if let Some(v) = opts.http2_initial_max_send_streams {
-                    h2_builder.initial_max_send_streams(v);
-                }
-                if let Some(v) = opts.http2_max_concurrent_reset_streams {
-                    h2_builder.max_concurrent_reset_streams(v);
-                }
-                if let Some(v) = opts.http2_initial_stream_window_size {
-                    h2_builder.initial_window_size(v);
-                }
-                if let Some(v) = opts.http2_initial_connection_window_size {
-                    h2_builder.initial_connection_window_size(v);
-                }
-                if let Some(v) = opts.http2_max_frame_size {
-                    h2_builder.max_frame_size(v);
-                }
-                if let Some(v) = opts.http2_max_header_list_size {
-                    h2_builder.max_header_list_size(v);
-                }
-                if let Some(v) = opts.http2_max_send_buffer_size {
-                    h2_builder.max_send_buffer_size(v);
-                }
-
-                let conn = h2_builder.handshake::<_, bytes::Bytes>(stream).await;
-                (h2_client, connection) = match conn {
-                    Ok(h2_conn) => h2_conn,
-                    Err(ref err) => {
-                        statistics.set_error(err, rt_stats);
-                        total += 1;
-                        continue 'connection;
-                    }
-                };
+                let (client, connection) =
+                    match h2_connect(endpoint, tls_name, &opts, &mut statistics, rt_stats).await {
+                        Some(p) => p,
+                        None => {
+                            total += 1;
+                            continue 'connection;
+                        }
+                    };
+                h2_client = client;
 
                 tokio::task::spawn(async move {
                     if let Err(err) = connection.await {
@@ -263,4 +188,53 @@ pub async fn http_hyper_h2(
     }
 
     statistics
+}
+
+fn h2_builder(opts: &Options) -> h2::client::Builder {
+    let mut h2_builder = h2::client::Builder::new();
+
+    // Note: h2 doesn't have adaptive_window option, only hyper does
+    if let Some(v) = opts.http2_initial_max_send_streams {
+        h2_builder.initial_max_send_streams(v);
+    }
+    if let Some(v) = opts.http2_max_concurrent_reset_streams {
+        h2_builder.max_concurrent_reset_streams(v);
+    }
+    if let Some(v) = opts.http2_initial_stream_window_size {
+        h2_builder.initial_window_size(v);
+    }
+    if let Some(v) = opts.http2_initial_connection_window_size {
+        h2_builder.initial_connection_window_size(v);
+    }
+    if let Some(v) = opts.http2_max_frame_size {
+        h2_builder.max_frame_size(v);
+    }
+    if let Some(v) = opts.http2_max_header_list_size {
+        h2_builder.max_header_list_size(v);
+    }
+    if let Some(v) = opts.http2_max_send_buffer_size {
+        h2_builder.max_send_buffer_size(v);
+    }
+
+    h2_builder
+}
+
+async fn h2_connect(
+    endpoint: &'static str,
+    tls_name: Option<&str>,
+    opts: &Options,
+    stats: &mut Statistics,
+    rt_stats: &RealtimeStats,
+) -> Option<(
+    h2::client::SendRequest<Bytes>,
+    h2::client::Connection<MaybeTlsStream, Bytes>,
+)> {
+    let stream = connect_stream(endpoint, tls_name, true, stats, rt_stats).await?;
+    match h2_builder(opts).handshake::<_, Bytes>(stream).await {
+        Ok(pair) => Some(pair),
+        Err(ref err) => {
+            stats.set_error(err, rt_stats);
+            None
+        }
+    }
 }

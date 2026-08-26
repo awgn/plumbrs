@@ -109,17 +109,17 @@ fn check_options(opts: &mut Options) -> Result<()> {
         ClientType::Help => {
             println!("Available client types:");
             println!(
-                "  hyper             - Hyper client, one per connection. Both HTTP/1 and HTTP/2"
+                "  hyper             - Hyper client, one per connection. Both HTTP/1 and HTTP/2. HTTPS"
             );
             #[cfg(feature = "mcp")]
             println!(
-                "  hyper-mcp         - Hyper client for MCP servers, one per connection. Both HTTP/1 and HTTP/2"
+                "  hyper-mcp         - Hyper client for MCP servers, one per connection. Both HTTP/1 and HTTP/2. HTTPS"
             );
             println!(
-                "  hyper-chunked     - Hyper client, one per connection, with multi-chunked body. Both HTTP/1 and HTTP/2"
+                "  hyper-chunked     - Hyper client, one per connection, with multi-chunked body. Both HTTP/1 and HTTP/2. HTTPS"
             );
             println!(
-                "  hyper-h2          - Hyper client, one per connection. Use h2 package, HTTP/2 only"
+                "  hyper-h2          - Hyper client, one per connection. Use h2 package, HTTP/2 only. HTTPS"
             );
             println!(
                 "  hyper-legacy      - Hyper client (legacy), one per connection. Both HTTP/1 and HTTP/2"
@@ -128,7 +128,7 @@ fn check_options(opts: &mut Options) -> Result<()> {
                 "  hyper-rt1         - Hyper client (legacy), one per runtime. Both HTTP/1 and HTTP/2"
             );
             println!(
-                "  reqwest           - Reqwest client, one per runtime. Both HTTP/1 and HTTP/2"
+                "  reqwest           - Reqwest client, one per runtime. Both HTTP/1 and HTTP/2. HTTPS"
             );
             #[cfg(all(target_os = "linux", feature = "tokio_uring"))]
             println!("  tokio-uring       - Tokio-uring client, one per thread. Only HTTP/1");
@@ -139,6 +139,35 @@ fn check_options(opts: &mut Options) -> Result<()> {
             std::process::exit(0);
         }
         _ => (),
+    }
+
+    for uri in &opts.uri {
+        if let Ok(parsed) = uri.parse::<http::Uri>()
+            && let Some(scheme) = parsed.scheme_str()
+            && !scheme.eq_ignore_ascii_case("http")
+            && !scheme.eq_ignore_ascii_case("https")
+        {
+            return Err(anyhow!(
+                "Unsupported URI scheme '{scheme}' (expected http or https)"
+            ));
+        }
+    }
+
+    let has_https = opts.uri.iter().any(|uri| {
+        uri.parse::<http::Uri>()
+            .ok()
+            .and_then(|u| u.scheme_str().map(|s| s.eq_ignore_ascii_case("https")))
+            .unwrap_or(false)
+    });
+
+    if has_https {
+        if !opts.client_type.supports_https() {
+            return Err(anyhow!(
+                "HTTPS is not supported with {} client!",
+                opts.client_type
+            ));
+        }
+        crate::client::tls::init(opts.insecure);
     }
 
     if let Some(nt) = opts.multithreaded

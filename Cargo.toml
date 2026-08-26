@@ -20,12 +20,14 @@ httparse = "1.10.1"
 hyper = { version = "1.11.0", features = ["full"] }
 pretty_env_logger = "0.5.0"
 tokio = { version = "1.53.1", features = ["full"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 tokio-util = { version = "0.7.19", features = ["full"] }
 tower = { version = "0.5.3", features = ["full"] }
 hyper-util = { version = "0.1.20", features = ["client", "client-legacy", "http1", "http2", "service", "tokio"] }
 http-body-util = "0.1.5"
 anyhow = "1.0.104"
 reqwest = { version = "0.13", features = ["stream"] }
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"] }
 rmcp = { version = "1.8", optional = true }
 rand = "0.8"
 atomic-time = "0.1.5"
@@ -38,6 +40,7 @@ http_wire = "0.7.1"
 ctor = "0.6.3"
 const_format = "0.2.36"
 quanta = "0.12.6"
+webpki-roots = "1"
 compio = { version = "0.18.0", optional = true, features = ["io", "net", "macros", "runtime"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

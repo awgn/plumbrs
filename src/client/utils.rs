@@ -13,6 +13,8 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use std::{str::FromStr, time::Instant};
 use tokio::net::TcpStream;
 
+use crate::client::tls::{self, MaybeTlsStream};
+
 /// This macro prints a formatted message to stderr and then exits the process
 /// with the given exit code.
 #[macro_export]
@@ -96,7 +98,12 @@ pub fn build_trailers(
 #[inline]
 pub fn get_conn_address(opts: &Options, uri: &hyper::Uri) -> Option<(String, u16)> {
     let mut host = String::from(uri.host()?);
-    let mut port = uri.port_u16().unwrap_or(if opts.http2 { 443 } else { 80 });
+    let default_port = match uri.scheme_str() {
+        Some("https") => 443,
+        _ if opts.http2 => 443,
+        _ => 80,
+    };
+    let mut port = uri.port_u16().unwrap_or(default_port);
     if let Some(ref h) = opts.host {
         host = h.clone();
     }
@@ -109,8 +116,47 @@ pub fn get_conn_address(opts: &Options, uri: &hyper::Uri) -> Option<(String, u16
 }
 
 #[inline]
+pub fn tls_server_name(uri: &http::Uri) -> Option<&str> {
+    match uri.scheme_str() {
+        Some("https") => uri.host(),
+        _ => None,
+    }
+}
+
+#[inline]
 pub fn build_conn_endpoint(host: &String, port: u16) -> &'static str {
     Box::leak(format!("{}:{}", host, port).into_boxed_str())
+}
+
+pub async fn connect_stream(
+    endpoint: &str,
+    tls_server_name: Option<&str>,
+    http2: bool,
+    stats: &mut Statistics,
+    rt_stats: &RealtimeStats,
+) -> Option<MaybeTlsStream> {
+    let stream_res = TcpStream::connect(endpoint)
+        .await
+        .and_then(|s| s.set_nodelay(true).map(|_| s));
+    let tcp = match stream_res {
+        Ok(s) => s,
+        Err(ref err) => {
+            stats.set_error(err, rt_stats);
+            return None;
+        }
+    };
+
+    if let Some(server_name) = tls_server_name {
+        match tls::connect(tcp, server_name, http2).await {
+            Ok(tls) => Some(MaybeTlsStream::Right(tls)),
+            Err(ref err) => {
+                stats.set_error(err, rt_stats);
+                None
+            }
+        }
+    } else {
+        Some(MaybeTlsStream::Left(tcp))
+    }
 }
 
 #[inline]
@@ -173,6 +219,7 @@ pub trait HttpConnectionBuilder {
 
     fn build_connection<B>(
         endpoint: &'static str,
+        tls_server_name: Option<&str>,
         stats: &mut Statistics,
         rt_stats: &RealtimeStats,
         _opts: &Options,
@@ -195,6 +242,7 @@ impl HttpConnectionBuilder for Http1 {
 
     async fn build_connection<B>(
         endpoint: &'static str,
+        tls_server_name: Option<&str>,
         stats: &mut Statistics,
         rt_stats: &RealtimeStats,
         opts: &Options,
@@ -204,16 +252,7 @@ impl HttpConnectionBuilder for Http1 {
         B::Data: Send,
         B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     {
-        let stream_res = TcpStream::connect(endpoint)
-            .await
-            .and_then(|s| s.set_nodelay(true).map(|_| s));
-        let stream = match stream_res {
-            Ok(s) => s,
-            Err(ref err) => {
-                stats.set_error(err, rt_stats);
-                return None;
-            }
-        };
+        let stream = connect_stream(endpoint, tls_server_name, false, stats, rt_stats).await?;
         let stream = TokioIo::new(stream);
         let mut builder = conn1::Builder::new();
 
@@ -279,6 +318,7 @@ impl HttpConnectionBuilder for Http2 {
 
     async fn build_connection<B>(
         endpoint: &'static str,
+        tls_server_name: Option<&str>,
         stats: &mut Statistics,
         rt_stats: &RealtimeStats,
         opts: &Options,
@@ -288,16 +328,7 @@ impl HttpConnectionBuilder for Http2 {
         B::Data: Send,
         B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     {
-        let stream_res = TcpStream::connect(endpoint)
-            .await
-            .and_then(|s| s.set_nodelay(true).map(|_| s));
-        let stream = match stream_res {
-            Ok(s) => s,
-            Err(ref err) => {
-                stats.set_error(err, rt_stats);
-                return None;
-            }
-        };
+        let stream = connect_stream(endpoint, tls_server_name, true, stats, rt_stats).await?;
         let stream = TokioIo::new(stream);
         let mut builder = conn2::Builder::new(TokioExecutor::new());
 

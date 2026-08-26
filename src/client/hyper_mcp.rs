@@ -133,14 +133,21 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
             );
         }
 
-        let (mut sender, mut conn_task) =
-            match B::build_connection(endpoint, &mut statistics, rt_stats, &opts).await {
-                Some(s) => s,
-                None => {
-                    total += 1;
-                    continue 'connection;
-                }
-            };
+        let (mut sender, mut conn_task) = match B::build_connection(
+            endpoint,
+            tls_server_name(&uri),
+            &mut statistics,
+            rt_stats,
+            &opts,
+        )
+        .await
+        {
+            Some(s) => s,
+            None => {
+                total += 1;
+                continue 'connection;
+            }
+        };
 
         statistics.inc_conn();
         conn_req_count = 0;
@@ -682,12 +689,10 @@ where
         .parse()
         .unwrap_or_else(|e| fatal!(3, "invalid base uri: {e}"));
 
-    let host = base_uri
-        .host()
-        .unwrap_or_else(|| fatal!(3, "no host in uri"))
-        .to_owned();
-    let port = base_uri.port_u16().unwrap_or(80);
+    let (host, port) =
+        get_conn_address(opts, &base_uri).unwrap_or_else(|| fatal!(3, "no host in uri"));
     let endpoint: &'static str = build_conn_endpoint(&host, port);
+    let tls_name = tls_server_name(&base_uri);
 
     // Create dummy stats for connection building
     let mut stats = Statistics::new(false);
@@ -696,7 +701,7 @@ where
     // Step 1: SSE handshake to get the message endpoint
     // Build connection for SSE GET request
     let (mut sse_sender, sse_conn_task) =
-        B::build_connection::<Full<Bytes>>(endpoint, &mut stats, &rt_stats, opts)
+        B::build_connection::<Full<Bytes>>(endpoint, tls_name, &mut stats, &rt_stats, opts)
             .await
             .unwrap_or_else(|| fatal!(3, "SSE connection failed"));
 
@@ -749,7 +754,7 @@ where
     };
 
     let (mut post_sender, _) =
-        Http1::build_connection::<Full<Bytes>>(endpoint, &mut stats, &rt_stats, opts)
+        Http1::build_connection::<Full<Bytes>>(endpoint, tls_name, &mut stats, &rt_stats, opts)
             .await
             .unwrap_or_else(|| fatal!(3, "POST connection failed"));
 

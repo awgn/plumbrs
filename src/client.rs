@@ -10,6 +10,7 @@ pub mod hyper_rt1;
 #[cfg(all(target_os = "linux", feature = "monoio"))]
 pub mod monoio;
 pub mod reqwest;
+pub mod tls;
 #[cfg(all(target_os = "linux", feature = "tokio_uring"))]
 pub mod tokio_uring;
 pub mod utils;
@@ -54,6 +55,21 @@ impl std::fmt::Display for ClientType {
             #[cfg(feature = "compio")]
             ClientType::Compio => write!(f, "compio"),
             ClientType::Help => write!(f, "help"),
+        }
+    }
+}
+
+impl ClientType {
+    pub fn supports_https(self) -> bool {
+        match self {
+            ClientType::Auto
+            | ClientType::Hyper
+            | ClientType::HyperChunked
+            | ClientType::HyperH2
+            | ClientType::Reqwest => true,
+            #[cfg(feature = "mcp")]
+            ClientType::HyperMcp => true,
+            _ => false,
         }
     }
 }

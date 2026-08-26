@@ -71,14 +71,21 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
             );
         }
 
-        let (mut sender, mut conn_task) =
-            match B::build_connection(endpoint, &mut statistics, rt_stats, &opts).await {
-                Some(s) => s,
-                None => {
-                    total += 1;
-                    continue 'connection;
-                }
-            };
+        let (mut sender, mut conn_task) = match B::build_connection(
+            endpoint,
+            tls_server_name(&uri),
+            &mut statistics,
+            rt_stats,
+            &opts,
+        )
+        .await
+        {
+            Some(s) => s,
+            None => {
+                total += 1;
+                continue 'connection;
+            }
+        };
 
         statistics.inc_conn();
         let mut conn_req_count: u32 = 0;
@@ -146,14 +153,21 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
 
             if is_last {
                 conn_task.abort();
-                (sender, conn_task) =
-                    match B::build_connection(endpoint, &mut statistics, rt_stats, &opts).await {
-                        Some(s) => s,
-                        None => {
-                            total += 1;
-                            continue 'connection;
-                        }
-                    };
+                (sender, conn_task) = match B::build_connection(
+                    endpoint,
+                    tls_server_name(&uri),
+                    &mut statistics,
+                    rt_stats,
+                    &opts,
+                )
+                .await
+                {
+                    Some(s) => s,
+                    None => {
+                        total += 1;
+                        continue 'connection;
+                    }
+                };
                 conn_req_count = 0;
             } else {
                 let res = sender.ready().await;

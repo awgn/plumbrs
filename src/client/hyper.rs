@@ -76,14 +76,21 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
             );
         }
 
-        let (mut sender, mut conn_task) =
-            match B::build_connection(endpoint, &mut statistics, rt_stats, &opts).await {
-                Some(s) => s,
-                None => {
-                    total += 1;
-                    continue 'connection;
-                }
-            };
+        let (mut sender, mut conn_task) = match B::build_connection(
+            endpoint,
+            tls_server_name(&uri),
+            &mut statistics,
+            rt_stats,
+            &opts,
+        )
+        .await
+        {
+            Some(s) => s,
+            None => {
+                total += 1;
+                continue 'connection;
+            }
+        };
 
         statistics.inc_conn();
         conn_req_count = 0;

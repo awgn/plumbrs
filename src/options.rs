@@ -102,6 +102,12 @@ pub struct Options {
     #[arg(help = "Use http2 only", long = "http2")]
     pub http2: bool,
     #[arg(
+        help = "Skip TLS certificate verification",
+        short = 'k',
+        long = "insecure"
+    )]
+    pub insecure: bool,
+    #[arg(
         help = "Enable latency estimation (Gil Tene's algorithm)",
         long = "latency"
     )]
@@ -223,7 +229,7 @@ pub struct Options {
     #[arg(help = "Set the port to connect to (e.g. 8080)", long = "port")]
     pub port: Option<u16>,
 
-    #[arg(help = "HTTP URIs used in the request (e.g. http://192.168.0.1:80)")]
+    #[arg(help = "HTTP/HTTPS URIs used in the request (e.g. http://192.168.0.1:80)")]
     pub uri: Vec<String>,
 }
 

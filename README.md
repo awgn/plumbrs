@@ -6,22 +6,22 @@ Plumbrs is a high-performance HTTP/HTTP2 request generator designed for benchmar
 
 ## Built-in clients
 
-- **Auto** (`auto`) — Automatically select the best client (default).
-- **Hyper** (`hyper`) — Hyper-based HTTP client (one per connection).
-- **Hyper MCP** (`hyper-mcp`) — Hyper client for MCP (Model Context Protocol) servers (requires `mcp` feature).
-- **Hyper chunked** (`hyper-chunked`) — Hyper client with multi-chunked body (one per connection). Both HTTP/1 and HTTP/2.
-- **Hyper legacy** (`hyper-legacy`) — Legacy Hyper HTTP client (one per connection).
-- **Hyper RT1** (`hyper-rt1`) — Legacy Hyper HTTP client shared across a runtime.
-- **Hyper H2** (`hyper-h2`) — HTTP/2 client using Hyper with the h2 library (one per connection).
-- **Reqwest** (`reqwest`) — Popular Reqwest HTTP client (one per runtime).
-- **TokioUring** (`tokio-uring`) — HTTP client using tokio-uring for high-performance I/O (Linux only, requires `tokio_uring` feature).
-- **Monoio** (`monoio`) — HTTP client using monoio for high-performance I/O (Linux only, requires `monoio` feature).
-- **Compio** (`compio`) — HTTP client using compio for high-performance I/O (requires `compio` feature).
+- **Auto** (`auto`) — Automatically select the best client (default). Uses `hyper` for `https://` URIs.
+- **Hyper** (`hyper`) — Hyper-based HTTP client (one per connection). Supports HTTPS.
+- **Hyper MCP** (`hyper-mcp`) — Hyper client for MCP (Model Context Protocol) servers (requires `mcp` feature). Supports HTTPS.
+- **Hyper chunked** (`hyper-chunked`) — Hyper client with multi-chunked body (one per connection). Both HTTP/1 and HTTP/2. Supports HTTPS.
+- **Hyper legacy** (`hyper-legacy`) — Legacy Hyper HTTP client (one per connection). HTTP only.
+- **Hyper RT1** (`hyper-rt1`) — Legacy Hyper HTTP client shared across a runtime. HTTP only.
+- **Hyper H2** (`hyper-h2`) — HTTP/2 client using Hyper with the h2 library (one per connection). Supports HTTPS.
+- **Reqwest** (`reqwest`) — Popular Reqwest HTTP client (one per runtime). Supports HTTPS.
+- **TokioUring** (`tokio-uring`) — HTTP client using tokio-uring for high-performance I/O (Linux only, requires `tokio_uring` feature). HTTP only.
+- **Monoio** (`monoio`) — HTTP client using monoio for high-performance I/O (Linux only, requires `monoio` feature). HTTP only.
+- **Compio** (`compio`) — HTTP client using compio for high-performance I/O (requires `compio` feature). HTTP only.
 - **Help** (`help`) — Print available client types and exit.
 
 ## Basic options
 
-- `<URI>` — HTTP URI(s) for the request (e.g., `http://192.168.0.1:80`). Required for most clients.
+- `<URI>` — HTTP/HTTPS URI(s) for the request (e.g., `http://192.168.0.1:80` or `https://example.com`). Required for most clients. HTTPS is supported with `auto`, `hyper`, `hyper-chunked`, `hyper-h2`, `hyper-mcp`, and `reqwest`. Forcing an incompatible client (e.g. `tokio-uring`, `hyper-legacy`) exits with an error.
 
 - `-t, --threads <NUMBER>` (default: `1`) — Number of worker threads.
 
@@ -41,9 +41,11 @@ Plumbrs is a high-performance HTTP/HTTP2 request generator designed for benchmar
 
 
 
-- `--host <HOST>` — Override the host to connect to. Not available with `hyper-legacy` or `hyper-rt1`.
+- `--host <HOST>` — Override the host to connect to. Not available with `hyper-legacy` or `hyper-rt1`. TLS SNI still uses the URI hostname.
 
 - `--port <PORT>` — Override the port to connect to.
+
+- `-k, --insecure` — Skip TLS certificate verification.
 
 - `-v, --verbose` — Enable verbose output.
 

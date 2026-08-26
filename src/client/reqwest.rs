@@ -132,6 +132,11 @@ pub async fn http_reqwest(
 
 pub fn build_http_client(opts: &Options, headers: &HeaderMap) -> Result<Client> {
     let mut builder = ClientBuilder::new().default_headers(headers.clone());
+    if opts.insecure {
+        builder = builder
+            .danger_accept_invalid_certs(true)
+            .danger_accept_invalid_hostnames(true);
+    }
     if opts.http2 {
         builder = builder.http2_adaptive_window(opts.http2_adaptive_window.unwrap_or(false));
 
