@@ -10,8 +10,8 @@ Plumbrs is a high-performance HTTP/HTTP2 request generator designed for benchmar
 - **Hyper** (`hyper`) — Hyper-based HTTP client (one per connection). Supports HTTPS.
 - **Hyper MCP** (`hyper-mcp`) — Hyper client for MCP (Model Context Protocol) servers (requires `mcp` feature). Supports HTTPS.
 - **Hyper chunked** (`hyper-chunked`) — Hyper client with multi-chunked body (one per connection). Both HTTP/1 and HTTP/2. Supports HTTPS.
-- **Hyper legacy** (`hyper-legacy`) — Legacy Hyper HTTP client (one per connection). HTTP only.
-- **Hyper RT1** (`hyper-rt1`) — Legacy Hyper HTTP client shared across a runtime. HTTP only.
+- **Hyper legacy** (`hyper-legacy`) — Legacy Hyper HTTP client (one per connection). Both HTTP/1 and HTTP/2. HTTP only (no HTTPS).
+- **Hyper RT1** (`hyper-rt1`) — Legacy Hyper HTTP client shared across a runtime. Both HTTP/1 and HTTP/2. HTTP only (no HTTPS).
 - **Hyper H2** (`hyper-h2`) — HTTP/2 client using Hyper with the h2 library (one per connection). Supports HTTPS.
 - **Reqwest** (`reqwest`) — Popular Reqwest HTTP client (one per runtime). Supports HTTPS.
 - **TokioUring** (`tokio-uring`) — HTTP client using tokio-uring for high-performance I/O (Linux only, requires `tokio_uring` feature). HTTP only.
@@ -130,9 +130,11 @@ plumbrs -c 10 -d 30 http://localhost:3001/sse --mcp-sse
 - `--max-io-events-per-tick <NUMBER>` — Maximum I/O events per tick.
 - `--disable-lifo-slot` — Disable LIFO slot heuristic (requires `tokio_unstable`).
 
-## io_uring options (Linux only)
+## io_uring and completion-based I/O options
 
 The `tokio-uring`, `monoio`, and `compio` clients support HTTP/1 only and do not support multi-threaded runtimes (`-m`).
+
+On Linux, the following options configure io_uring submission queues:
 
 - `--uring-entries <NUMBER>` (default: `4096`) — Size of the io_uring Submission Queue.
 - `--uring-sqpoll <MILLISECONDS>` — Enable kernel-side submission polling with idle timeout in milliseconds.
@@ -196,6 +198,21 @@ Plumbrs uses [mimalloc](https://github.com/microsoft/mimalloc) by default for im
 |---|---|
 | `cargo build --release` | mimalloc (default) |
 | `cargo build --release --no-default-features` | system allocator |
+
+## Enabling io_uring and completion-based I/O support
+
+To enable `io_uring` or completion-based clients, build Plumbrs with the corresponding feature:
+
+```bash
+# Linux only: io_uring with tokio-uring
+cargo build --release --features tokio_uring
+
+# Linux only: io_uring with monoio
+cargo build --release --features monoio
+
+# Cross-platform completion-based I/O with compio
+cargo build --release --features compio
+```
 
 ## Enabling MCP support
 

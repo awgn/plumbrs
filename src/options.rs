@@ -50,7 +50,7 @@ pub struct Options {
     )]
     pub stats_csv_header: bool,
     #[arg(
-        help = "Concurrent number of connections or HTTP2 streams",
+        help = "Number of connections or HTTP2 streams",
         short = 'c',
         long = "concurrency",
         default_value_t = 1
@@ -94,7 +94,7 @@ pub struct Options {
     )]
     pub body: Vec<String>,
     #[arg(
-        help = "Requests per connection to issue (--rpc 1 is useful to evaluate connections per second)",
+        help = "Requests per connection to issue (--rpc 1 corresponds to connections per second)",
         long = "rpc",
         default_value_t = u32::MAX
     )]
