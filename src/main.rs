@@ -109,6 +109,16 @@ fn check_options(opts: &mut Options) -> Result<()> {
         ClientType::Reqwest if opts.sni.is_some() => {
             return Err(anyhow!("SNI option not available with reqwest client!"));
         }
+        ClientType::HyperLegacy | ClientType::HyperRt1 | ClientType::Reqwest
+            if opts.absolute_uri =>
+        {
+            return Err(anyhow!(
+                "--absolute-uri is not available with this client!"
+            ));
+        }
+        ClientType::HyperH2 if opts.absolute_uri => {
+            return Err(anyhow!("--absolute-uri is not available with HTTP/2"));
+        }
         ClientType::Help => {
             println!("Available client types:");
             println!(
@@ -142,6 +152,10 @@ fn check_options(opts: &mut Options) -> Result<()> {
             std::process::exit(0);
         }
         _ => (),
+    }
+
+    if opts.absolute_uri && opts.http2 {
+        return Err(anyhow!("--absolute-uri is not available with HTTP/2"));
     }
 
     for uri in &opts.uri {

@@ -45,6 +45,8 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
         get_conn_address(&opts, &uri).unwrap_or_else(|| fatal!(1, "no host specified in uri"));
     let endpoint = build_conn_endpoint(&host, port);
 
+    let req_uri = request_uri(&uri, opts.absolute_uri || opts.http2);
+
     let headers = build_headers(&uri, opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
 
@@ -120,7 +122,7 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
 
             let mut req = Request::new(body);
             *req.method_mut() = opts.method.clone().unwrap_or(http::Method::GET);
-            *req.uri_mut() = uri.clone();
+            *req.uri_mut() = req_uri.clone();
             *req.headers_mut() = req_headers;
 
             let start_lat = opts.latency.then_some(clock.raw());

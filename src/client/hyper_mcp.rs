@@ -95,6 +95,8 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
         }
     }
 
+    let req_uri = request_uri(&uri, opts.absolute_uri || opts.http2);
+
     // MCP requires Content-Type: application/json for JSON-RPC requests
     // Accept header must include both application/json and text/event-stream for Streamable HTTP
     headers.insert(
@@ -194,7 +196,7 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
             let mut req = Request::new(body);
             // MCP JSON-RPC requests must use POST method
             *req.method_mut() = http::Method::POST;
-            *req.uri_mut() = uri.clone();
+            *req.uri_mut() = req_uri.clone();
             *req.headers_mut() = req_headers;
 
             let start_lat = opts.latency.then_some(clock.raw());
@@ -387,10 +389,11 @@ where
     };
 
     let init_body = serde_json::to_vec(&init_jsonrpc)?;
+    let req_uri = request_uri(uri, opts.absolute_uri || opts.http2);
 
     let mut req = Request::new(Full::new(Bytes::from(init_body)));
     *req.method_mut() = http::Method::POST;
-    *req.uri_mut() = uri.clone();
+    *req.uri_mut() = req_uri.clone();
     *req.headers_mut() = base_headers.clone();
 
     let response = sender
@@ -467,7 +470,7 @@ where
 
     let mut req = Request::new(Full::new(Bytes::from(initialized_body)));
     *req.method_mut() = http::Method::POST;
-    *req.uri_mut() = uri.clone();
+    *req.uri_mut() = req_uri.clone();
     *req.headers_mut() = headers_with_session.clone();
 
     // Wait for sender to be ready
@@ -509,7 +512,7 @@ where
 
     let mut req = Request::new(Full::new(Bytes::from(tools_list_body)));
     *req.method_mut() = http::Method::POST;
-    *req.uri_mut() = uri.clone();
+    *req.uri_mut() = req_uri.clone();
     *req.headers_mut() = headers_with_session.clone();
 
     // Wait for sender to be ready
@@ -706,9 +709,10 @@ where
             .unwrap_or_else(|| fatal!(3, "SSE connection failed"));
 
     // Build SSE GET request
+    let sse_req_uri = request_uri(&base_uri, opts.absolute_uri || opts.http2);
     let mut sse_req_builder = Request::builder()
         .method(http::Method::GET)
-        .uri(base_uri.clone())
+        .uri(sse_req_uri)
         .header(http::header::HOST, format!("{}:{}", host, port))
         .header(http::header::ACCEPT, MIME_TEXT_EVENT_STREAM)
         .header(http::header::CACHE_CONTROL, "no-cache");
@@ -752,6 +756,7 @@ where
         );
         hyper::Uri::from_parts(parts).unwrap_or_else(|e| fatal!(3, "invalid new uri: {e}"))
     };
+    let post_uri = request_uri(&new_uri, opts.absolute_uri || opts.http2);
 
     let (mut post_sender, _) =
         Http1::build_connection::<Full<Bytes>>(endpoint, tls_name, &mut stats, &rt_stats, opts)
@@ -805,7 +810,7 @@ where
         .unwrap_or_else(|e| fatal!(3, "failed to serialize initialize request: {e}"));
 
     // Send the initialize request via POST
-    let _ = send_post(&new_uri, headers, init_body, &mut post_sender).await;
+    let _ = send_post(&post_uri, headers, init_body, &mut post_sender).await;
 
     // Read the initialize response from the SSE stream
     let init_response_body = read_sse_event(&mut sse_body, &mut buffer)
@@ -831,7 +836,7 @@ where
     let initialized_body = serde_json::to_vec(&notif_jsonrpc)
         .unwrap_or_else(|e| fatal!(3, "failed to serialize initialized notification: {e}"));
 
-    let _ = send_post(&new_uri, headers, initialized_body, &mut post_sender).await;
+    let _ = send_post(&post_uri, headers, initialized_body, &mut post_sender).await;
 
     // Step 4: Send tools/list request
     let tools_list_request = ListToolsRequest::default();
@@ -846,7 +851,7 @@ where
         .unwrap_or_else(|e| fatal!(3, "failed to serialize tools/list request: {e}"));
 
     // Send the request via POST
-    let _ = send_post(&new_uri, headers, tools_list_body, &mut post_sender).await;
+    let _ = send_post(&post_uri, headers, tools_list_body, &mut post_sender).await;
 
     // Read the response from the SSE stream, handling any server requests (like roots/list)
     let tools_response_body;
@@ -879,7 +884,7 @@ where
                             fatal!(3, "failed to serialize roots/list response: {e}")
                         });
 
-                        let _ = send_post(&new_uri, headers, roots_body, &mut post_sender).await;
+                        let _ = send_post(&post_uri, headers, roots_body, &mut post_sender).await;
 
                         continue; // Keep reading for tools/list response
                     }

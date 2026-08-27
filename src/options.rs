@@ -230,6 +230,12 @@ pub struct Options {
     pub port: Option<u16>,
     #[arg(help = "Set the TLS SNI server name", long = "sni")]
     pub sni: Option<String>,
+    #[arg(
+        help = "Send HTTP/1 request-target in absolute-form (e.g. http://host/path) instead of origin-form (/path)",
+        long = "absolute-uri",
+        default_value_t = false
+    )]
+    pub absolute_uri: bool,
 
     #[arg(help = "HTTP/HTTPS URIs used in the request (e.g. http://192.168.0.1:80)")]
     pub uri: Vec<String>,

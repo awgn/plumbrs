@@ -9,7 +9,8 @@ use monoio::net::TcpStream;
 
 use crate::{
     client::utils::{
-        build_conn_endpoint, build_headers, build_trailers, get_conn_address, should_stop,
+        build_conn_endpoint, build_headers, build_trailers, get_conn_address, request_uri,
+        should_stop,
     },
     fatal,
     options::Options,
@@ -62,7 +63,7 @@ pub async fn http_monoio(
 
     let mut req = Request::new(body);
     *req.method_mut() = opts.method.clone().unwrap_or(http::Method::GET);
-    *req.uri_mut() = uri.clone();
+    *req.uri_mut() = request_uri(&uri, opts.absolute_uri);
     *req.headers_mut() = headers.clone();
 
     // Pre-serialize the request to bytes ONCE outside the loop for better performance

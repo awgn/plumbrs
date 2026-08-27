@@ -95,6 +95,31 @@ pub fn build_trailers(
     Ok(Some(trailers))
 }
 
+/// URI placed on the HTTP request.
+///
+/// HTTP/1 origin servers expect origin-form (`/path`). Absolute-form
+/// (`http://host/path`) is used when `absolute` is true, and must also be
+/// kept for HTTP/2 so `:scheme` / `:authority` can be derived.
+#[inline]
+pub fn request_uri(uri: &http::Uri, absolute: bool) -> http::Uri {
+    if absolute {
+        uri.clone()
+    } else {
+        origin_form(uri)
+    }
+}
+
+#[inline]
+pub fn origin_form(uri: &http::Uri) -> http::Uri {
+    match uri.path_and_query() {
+        Some(pq) if !pq.as_str().is_empty() => pq
+            .as_str()
+            .parse()
+            .unwrap_or_else(|_| http::Uri::from_static("/")),
+        _ => http::Uri::from_static("/"),
+    }
+}
+
 #[inline]
 pub fn get_conn_address(opts: &Options, uri: &hyper::Uri) -> Option<(String, u16)> {
     let mut host = String::from(uri.host()?);
@@ -425,4 +450,39 @@ where
         }
     }
     builder.build_http()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn origin_form_strips_scheme_and_authority() {
+        let uri: http::Uri = "http://myhost/home".parse().unwrap();
+        assert_eq!(origin_form(&uri).to_string(), "/home");
+    }
+
+    #[test]
+    fn origin_form_keeps_query() {
+        let uri: http::Uri = "https://myhost:8080/home?x=1".parse().unwrap();
+        assert_eq!(origin_form(&uri).to_string(), "/home?x=1");
+    }
+
+    #[test]
+    fn origin_form_empty_path() {
+        let uri: http::Uri = "http://myhost".parse().unwrap();
+        assert_eq!(origin_form(&uri).to_string(), "/");
+    }
+
+    #[test]
+    fn request_uri_absolute_unchanged() {
+        let uri: http::Uri = "http://myhost/home".parse().unwrap();
+        assert_eq!(request_uri(&uri, true), uri);
+    }
+
+    #[test]
+    fn request_uri_relative_is_origin_form() {
+        let uri: http::Uri = "http://myhost/home".parse().unwrap();
+        assert_eq!(request_uri(&uri, false).to_string(), "/home");
+    }
 }
