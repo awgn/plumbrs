@@ -47,7 +47,7 @@ Plumbrs is a high-performance HTTP/HTTP2 request generator designed for benchmar
 
 - `--sni <NAME>` — Override the TLS SNI server name. Defaults to the URI hostname. Not available with `reqwest`.
 
-- `--absolute-uri` — Send the HTTP/1 request-target in absolute-form (`GET http://host/path`) instead of origin-form (`GET /path`). Origin-form is the default. Not available with `reqwest`, `hyper-legacy`, `hyper-rt1`, or HTTP/2.
+- `--absolute-uri` — Send the HTTP/1 request-target in absolute-form (`GET http://host/path`) instead of origin-form (`GET /path`). Origin-form is the default. Not available with `reqwest`, `hyper-legacy`, or `hyper-rt1`.
 
 - `-k, --insecure` — Skip TLS certificate verification.
 

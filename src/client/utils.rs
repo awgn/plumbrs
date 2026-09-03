@@ -57,12 +57,18 @@ pub fn build_headers(
         );
     }
 
-    if !opts.http2 {
-        match (uri.host(), uri.port()) {
+    if !opts.http2 && !headers.contains_key(header::HOST) {
+        let host = uri.host().or(opts.host.as_deref());
+        let port = uri
+            .port()
+            .map(|p| p.as_str().to_string())
+            .or_else(|| opts.port.map(|p| p.to_string()));
+
+        match (host, port) {
             (Some(host), None) => {
                 headers.append(header::HOST, HeaderValue::from_str(host)?);
             }
-            (Some(host), Some(port)) => {
+            (Some(host), Some(ref port)) => {
                 headers.append(
                     header::HOST,
                     HeaderValue::from_str(&format!("{}:{}", host, port))?,
@@ -122,7 +128,10 @@ pub fn origin_form(uri: &http::Uri) -> http::Uri {
 
 #[inline]
 pub fn get_conn_address(opts: &Options, uri: &hyper::Uri) -> Option<(String, u16)> {
-    let mut host = String::from(uri.host()?);
+    let mut host = opts
+        .host
+        .clone()
+        .or_else(|| uri.host().map(String::from))?;
     let default_port = match uri.scheme_str() {
         Some("https") => 443,
         _ if opts.http2 => 443,
@@ -455,6 +464,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
 
     #[test]
     fn origin_form_strips_scheme_and_authority() {
@@ -484,5 +494,53 @@ mod tests {
     fn request_uri_relative_is_origin_form() {
         let uri: http::Uri = "http://myhost/home".parse().unwrap();
         assert_eq!(request_uri(&uri, false).to_string(), "/home");
+    }
+
+    #[test]
+    fn build_headers_http1_with_hostname() {
+        let opts = Options::parse_from(["plumbrs", "http://example.com/api"]);
+        let uri: http::Uri = "http://example.com/api".parse().unwrap();
+        let headers = build_headers(&uri, &opts).unwrap();
+        assert_eq!(headers.get(header::HOST).unwrap(), "example.com");
+    }
+
+    #[test]
+    fn build_headers_http1_with_ip() {
+        let opts = Options::parse_from(["plumbrs", "http://192.168.1.1:8080/api"]);
+        let uri: http::Uri = "http://192.168.1.1:8080/api".parse().unwrap();
+        let headers = build_headers(&uri, &opts).unwrap();
+        assert_eq!(headers.get(header::HOST).unwrap(), "192.168.1.1:8080");
+    }
+
+    #[test]
+    fn build_headers_http1_custom_host_header_preserved() {
+        let opts = Options::parse_from([
+            "plumbrs",
+            "-H",
+            "Host:custom.override.com",
+            "http://192.168.1.1:8080/api",
+        ]);
+        let uri: http::Uri = "http://192.168.1.1:8080/api".parse().unwrap();
+        let headers = build_headers(&uri, &opts).unwrap();
+        let host_headers: Vec<_> = headers.get_all(header::HOST).iter().collect();
+        assert_eq!(host_headers.len(), 1);
+        assert_eq!(host_headers[0], "custom.override.com");
+    }
+
+    #[test]
+    fn build_headers_http2_omits_host_header() {
+        let opts = Options::parse_from(["plumbrs", "--http2", "http://example.com/api"]);
+        let uri: http::Uri = "http://example.com/api".parse().unwrap();
+        let headers = build_headers(&uri, &opts).unwrap();
+        assert!(headers.get(header::HOST).is_none());
+    }
+
+    #[test]
+    fn get_conn_address_fallback_to_opts_host() {
+        let opts = Options::parse_from(["plumbrs", "--host", "10.0.0.1", "/api"]);
+        let uri: hyper::Uri = "/api".parse().unwrap();
+        let (host, port) = get_conn_address(&opts, &uri).unwrap();
+        assert_eq!(host, "10.0.0.1");
+        assert_eq!(port, 80);
     }
 }

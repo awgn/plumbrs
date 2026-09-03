@@ -116,9 +116,7 @@ fn check_options(opts: &mut Options) -> Result<()> {
                 "--absolute-uri is not available with this client!"
             ));
         }
-        ClientType::HyperH2 if opts.absolute_uri => {
-            return Err(anyhow!("--absolute-uri is not available with HTTP/2"));
-        }
+
         ClientType::Help => {
             println!("Available client types:");
             println!(
@@ -154,9 +152,7 @@ fn check_options(opts: &mut Options) -> Result<()> {
         _ => (),
     }
 
-    if opts.absolute_uri && opts.http2 {
-        return Err(anyhow!("--absolute-uri is not available with HTTP/2"));
-    }
+
 
     for uri in &opts.uri {
         if let Ok(parsed) = uri.parse::<http::Uri>()
