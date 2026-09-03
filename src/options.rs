@@ -224,7 +224,7 @@ pub struct Options {
     )]
     pub uring_sqpoll: Option<u32>,
 
-    #[arg(help = "Set the host to connect to (e.g. 192.168.0.1)", long = "host")]
+    #[arg(help = "Set the HTTP Host header (e.g. example.com)", long = "host")]
     pub host: Option<String>,
     #[arg(help = "Set the port to connect to (e.g. 8080)", long = "port")]
     pub port: Option<u16>,

@@ -58,23 +58,28 @@ pub fn build_headers(
     }
 
     if !opts.http2 && !headers.contains_key(header::HOST) {
-        let host = uri.host().or(opts.host.as_deref());
+        let host = opts.host.as_deref().or_else(|| uri.host());
         let port = uri
             .port()
             .map(|p| p.as_str().to_string())
             .or_else(|| opts.port.map(|p| p.to_string()));
 
-        match (host, port) {
-            (Some(host), None) => {
+        if let Some(host) = host {
+            if host.contains(':') {
                 headers.append(header::HOST, HeaderValue::from_str(host)?);
+            } else {
+                match port {
+                    Some(ref port) => {
+                        headers.append(
+                            header::HOST,
+                            HeaderValue::from_str(&format!("{}:{}", host, port))?,
+                        );
+                    }
+                    None => {
+                        headers.append(header::HOST, HeaderValue::from_str(host)?);
+                    }
+                }
             }
-            (Some(host), Some(ref port)) => {
-                headers.append(
-                    header::HOST,
-                    HeaderValue::from_str(&format!("{}:{}", host, port))?,
-                );
-            }
-            _ => (),
         }
     }
 
@@ -128,20 +133,16 @@ pub fn origin_form(uri: &http::Uri) -> http::Uri {
 
 #[inline]
 pub fn get_conn_address(opts: &Options, uri: &hyper::Uri) -> Option<(String, u16)> {
-    let mut host = opts
-        .host
-        .clone()
-        .or_else(|| uri.host().map(String::from))?;
+    let host = uri
+        .host()
+        .map(String::from)
+        .or_else(|| opts.host.clone())?;
     let default_port = match uri.scheme_str() {
         Some("https") => 443,
         _ if opts.http2 => 443,
         _ => 80,
     };
     let mut port = uri.port_u16().unwrap_or(default_port);
-    if let Some(ref h) = opts.host {
-        host = h.clone();
-    }
-
     if let Some(ref p) = opts.port {
         port = *p;
     }
@@ -533,6 +534,19 @@ mod tests {
         let uri: http::Uri = "http://example.com/api".parse().unwrap();
         let headers = build_headers(&uri, &opts).unwrap();
         assert!(headers.get(header::HOST).is_none());
+    }
+
+    #[test]
+    fn build_headers_http1_with_opts_host() {
+        let opts = Options::parse_from(["plumbrs", "--host", "virtual.host.com", "http://192.168.1.1:8080/api"]);
+        let uri: http::Uri = "http://192.168.1.1:8080/api".parse().unwrap();
+        let headers = build_headers(&uri, &opts).unwrap();
+        assert_eq!(headers.get(header::HOST).unwrap(), "virtual.host.com:8080");
+
+        // And verify get_conn_address still connects to the endpoint IP, not the virtual host!
+        let (host, port) = get_conn_address(&opts, &uri).unwrap();
+        assert_eq!(host, "192.168.1.1");
+        assert_eq!(port, 8080);
     }
 
     #[test]

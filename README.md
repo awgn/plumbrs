@@ -41,7 +41,7 @@ Plumbrs is a high-performance HTTP/HTTP2 request generator designed for benchmar
 
 
 
-- `--host <HOST>` — Override the host to connect to. Not available with `hyper-legacy` or `hyper-rt1`. TLS SNI still uses the URI hostname unless `--sni` is set.
+- `--host <HOST>` — Override the HTTP `Host` header (e.g. for virtual hosting). Defaults to the URI hostname/IP.
 
 - `--port <PORT>` — Override the port to connect to.
 

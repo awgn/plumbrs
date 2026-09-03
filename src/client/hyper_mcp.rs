@@ -713,7 +713,6 @@ where
     let mut sse_req_builder = Request::builder()
         .method(http::Method::GET)
         .uri(sse_req_uri)
-        .header(http::header::HOST, format!("{}:{}", host, port))
         .header(http::header::ACCEPT, MIME_TEXT_EVENT_STREAM)
         .header(http::header::CACHE_CONTROL, "no-cache");
 

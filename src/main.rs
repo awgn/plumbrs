@@ -103,9 +103,7 @@ fn check_options(opts: &mut Options) -> Result<()> {
             eprintln!("Missing URI. Try --help");
             std::process::exit(1);
         }
-        ClientType::HyperLegacy | ClientType::HyperRt1 if opts.host.is_some() => {
-            return Err(anyhow!("Host option not available with this client!"));
-        }
+
         ClientType::Reqwest if opts.sni.is_some() => {
             return Err(anyhow!("SNI option not available with reqwest client!"));
         }
