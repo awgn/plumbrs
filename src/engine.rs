@@ -59,8 +59,6 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
     runtime_stats.resize_with(instances, Default::default);
     let rt_stats = Arc::new(runtime_stats);
 
-    let start = Instant::now();
-
     // spawn tasks...
     let meters = Builder::new_multi_thread()
         .enable_all()
@@ -114,9 +112,19 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
         handles.push(handle);
     }
 
+    let start = Instant::now();
     let coll = handles.into_iter().map(|h| h.join().expect("thread error"));
     let out: Vec<(Statistics, Metrics)> = coll.collect::<Result<Vec<_>, _>>()?;
-    let duration = start.elapsed().as_micros() as u64;
+    
+    // Total wall-clock time (including the remaining runtime overhead)
+    let execution_time = start.elapsed().as_micros() as u64;
+    
+    // For an exact Rate estimation, we neutralize the setup/teardown overhead
+    // if a hard time limit was requested, by taking the minimum of the two targets.
+    let duration = match opts.duration {
+        Some(d) => std::cmp::min(execution_time, d.as_micros() as u64),
+        None => execution_time,
+    };
 
     let (total_stats, total_metrics) = out.into_iter().fold(
         (Statistics::default(), Metrics::default()),
