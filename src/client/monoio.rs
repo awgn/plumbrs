@@ -9,8 +9,8 @@ use monoio::net::TcpStream;
 
 use crate::{
     client::utils::{
-        build_conn_endpoint, build_headers, build_trailers, get_conn_address, request_uri,
-        should_stop,
+        build_conn_endpoint, build_headers, build_trailers, ensure_content_length,
+        get_conn_address, request_uri, should_stop,
     },
     fatal,
     options::Options,
@@ -43,10 +43,14 @@ pub async fn http_monoio(
     let trailers = build_trailers(opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build trailers: {e}"));
 
-    let bodies: Vec<Full<Bytes>> = opts.bodies().map_or_else(
-        |e| fatal!(2, "could not read body: {e}"),
-        |b| b.into_iter().map(Full::new).collect::<Vec<_>>(),
+    let raw_bodies = opts
+        .bodies()
+        .unwrap_or_else(|e| fatal!(2, "could not read body: {e}"));
+    let headers = ensure_content_length(
+        headers,
+        raw_bodies.first().map(|b| b.len()).unwrap_or(0),
     );
+    let bodies: Vec<Full<Bytes>> = raw_bodies.into_iter().map(Full::new).collect::<Vec<_>>();
 
     let body = bodies
         .first()

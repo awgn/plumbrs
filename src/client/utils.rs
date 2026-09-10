@@ -106,6 +106,30 @@ pub fn build_trailers(
     Ok(Some(trailers))
 }
 
+/// Add an explicit `Content-Length` for the raw io_uring clients
+/// (compio, monoio, tokio-uring).
+///
+/// Those clients serialize the request with `http_wire` and write the bytes
+/// as-is, so framing must be explicit: without `Content-Length` the upstream
+/// treats the request as bodyless and the body never reaches it (hyper-based
+/// clients get framing for free from hyper). User-provided `Content-Length`
+/// or `Transfer-Encoding` headers are left untouched.
+pub fn ensure_content_length(mut headers: HeaderMap, body_len: usize) -> HeaderMap {
+    if body_len > 0
+        && !headers.contains_key(header::CONTENT_LENGTH)
+        && !headers.contains_key(header::TRANSFER_ENCODING)
+    {
+        headers.insert(
+            header::CONTENT_LENGTH,
+            body_len
+                .to_string()
+                .parse()
+                .expect("body length is a valid header value"),
+        );
+    }
+    headers
+}
+
 /// URI placed on the HTTP request.
 ///
 /// HTTP/1 origin servers expect origin-form (`/path`). Absolute-form
