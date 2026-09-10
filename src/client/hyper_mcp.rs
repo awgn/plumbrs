@@ -9,11 +9,12 @@ use bytes::Bytes;
 
 use http::{HeaderMap, Request, StatusCode, header};
 
-use rand::Rng;
+use rand::RngExt;
 use rmcp::model::{
-    CallToolRequest, CallToolRequestParams, ClientCapabilities, Implementation, InitializeRequest,
-    InitializeRequestParams, InitializeResult, InitializedNotification, JsonObject, JsonRpcRequest,
-    JsonRpcResponse, ListRootsResult, ListToolsRequest, ListToolsResult, NumberOrString,
+    CallToolRequest, CallToolRequestParams, ClientCapabilities, ErrorCode, ErrorData,
+    Implementation, InitializeRequest, InitializeRequestParams, InitializeResult,
+    InitializedNotification, JsonObject, JsonRpcError, JsonRpcRequest, JsonRpcResponse,
+    ListToolsRequest, ListToolsResult, NumberOrString,
 };
 use rmcp::serde_json::{self, Map, Value};
 
@@ -261,7 +262,7 @@ fn create_tool_request(arguments: &Arc<JsonObject>, opts: &Options) -> Option<Ma
     let properties = arguments.get("properties").and_then(|v| v.as_object())?;
 
     let mut generated_request_args = Map::new();
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     for required_arg in required {
         let field_name = required_arg.as_str()?;
@@ -276,7 +277,7 @@ fn create_tool_request(arguments: &Arc<JsonObject>, opts: &Options) -> Option<Ma
 
 const MAX_RECURSION_DEPTH: usize = 10;
 
-fn generate_value_from_schema<R: Rng>(
+fn generate_value_from_schema<R: RngExt>(
     schema: &Value,
     rng: &mut R,
     opts: &Options,
@@ -300,17 +301,17 @@ fn generate_value_from_schema<R: Rng>(
         "string" => {
             let len = opts
                 .mcp_rand_string_len
-                .unwrap_or_else(|| rng.gen_range(5..20));
+                .unwrap_or_else(|| rng.random_range(5..20));
             let s: String = (0..len)
-                .map(|_| rng.sample(rand::distributions::Alphanumeric) as char)
+                .map(|_| rng.sample(rand::distr::Alphanumeric) as char)
                 .collect();
             Value::String(s)
         }
-        "number" => Value::Number(rng.gen_range(-1000..1000i64).into()),
-        "integer" => Value::Number(rng.gen_range(0..1000).into()),
-        "boolean" => Value::Bool(rng.gen_bool(0.5)),
+        "number" => Value::Number(rng.random_range(-1000..1000i64).into()),
+        "integer" => Value::Number(rng.random_range(0..1000).into()),
+        "boolean" => Value::Bool(rng.random_bool(0.5)),
         "array" => {
-            let len = rng.gen_range(1..4);
+            let len = rng.random_range(1..4);
             let items_schema = schema.get("items");
             let items: Vec<Value> = (0..len)
                 .map(|_| {
@@ -349,12 +350,12 @@ fn generate_value_from_schema<R: Rng>(
 
 /// Generates a primitive value when no schema is available.
 /// Used as a fallback for array items without a defined schema.
-fn generate_primitive_value<R: Rng>(rng: &mut R) -> Value {
-    match rng.gen_range(0..4) {
+fn generate_primitive_value<R: RngExt>(rng: &mut R) -> Value {
+    match rng.random_range(0..4) {
         0 => Value::String("sample".to_string()),
-        1 => Value::Number(rng.gen_range(-100..100i64).into()),
-        2 => Value::Number(rng.gen_range(0..100).into()),
-        3 => Value::Bool(rng.gen_bool(0.5)),
+        1 => Value::Number(rng.random_range(-100..100i64).into()),
+        2 => Value::Number(rng.random_range(0..100).into()),
+        3 => Value::Bool(rng.random_bool(0.5)),
         _ => Value::Null,
     }
 }
@@ -375,8 +376,9 @@ where
     S: RequestSender<Full<Bytes>>,
 {
     // Step 1: Send MCP initialize request
+    // Note: no client capabilities advertised (roots was removed by SEP-2577).
     let init_params = InitializeRequestParams::new(
-        ClientCapabilities::builder().enable_roots().build(),
+        ClientCapabilities::builder().build(),
         Implementation::new("plumbrs".to_string(), env!("CARGO_PKG_VERSION").to_string()),
     );
 
@@ -791,9 +793,9 @@ where
             .unwrap_or_else(|e| fatal!(3, "POST request failed: {e}"))
     }
 
-    // Step 2: Send MCP initialize request
+    // Step 2: Send MCP initialize request (no client capabilities: roots was removed by SEP-2577)
     let init_params = InitializeRequestParams::new(
-        ClientCapabilities::builder().enable_roots().build(),
+        ClientCapabilities::builder().build(),
         Implementation::new("plumbrs".to_string(), env!("CARGO_PKG_VERSION").to_string()),
     );
 
@@ -864,22 +866,27 @@ where
         if let Ok(server_req) = serde_json::from_str::<serde_json::Value>(&data) {
             if let Some(method) = server_req.get("method").and_then(|m| m.as_str()) {
                 if let Some(req_id) = server_req.get("id") {
-                    // Handle roots/list request from server
+                    // Roots were removed by SEP-2577, so we don't advertise the
+                    // capability; answer legacy servers with MethodNotFound.
                     if method == "roots/list" {
-                        let roots_result = ListRootsResult::new(vec![]);
-                        let roots_response = JsonRpcResponse {
-                            jsonrpc: Default::default(),
-                            id: req_id
-                                .as_i64()
-                                .map(NumberOrString::Number)
-                                .or_else(|| {
-                                    req_id.as_str().map(|s| NumberOrString::String(s.into()))
-                                })
-                                .unwrap_or(NumberOrString::Number(0)),
-                            result: roots_result,
-                        };
+                        let roots_error = JsonRpcError::new(
+                            Some(
+                                req_id
+                                    .as_i64()
+                                    .map(NumberOrString::Number)
+                                    .or_else(|| {
+                                        req_id.as_str().map(|s| NumberOrString::String(s.into()))
+                                    })
+                                    .unwrap_or(NumberOrString::Number(0)),
+                            ),
+                            ErrorData::new(
+                                ErrorCode::METHOD_NOT_FOUND,
+                                "roots/list is not supported (removed by SEP-2577)",
+                                None,
+                            ),
+                        );
 
-                        let roots_body = serde_json::to_vec(&roots_response).unwrap_or_else(|e| {
+                        let roots_body = serde_json::to_vec(&roots_error).unwrap_or_else(|e| {
                             fatal!(3, "failed to serialize roots/list response: {e}")
                         });
 

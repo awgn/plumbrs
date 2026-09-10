@@ -14,20 +14,15 @@ use crossterm::{cursor, execute};
 use mimalloc::MiMalloc;
 
 use crate::options::Options;
-use ctor::dtor;
 
 #[cfg(feature = "mimalloc")]
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
-#[dtor]
-fn cleanup() {
-    _ = execute!(std::io::stderr(), cursor::Show);
-}
-
 fn main() -> Result<()> {
-    // Hide cursor and ensure it's restored on exit
+    // Hide cursor and ensure it's restored on exit (including early returns via `?`)
     _ = execute!(std::io::stderr(), cursor::Hide);
+    let _cursor_guard = scopeguard::guard((), |_| _ = execute!(std::io::stderr(), cursor::Show));
 
     #[cfg(feature = "mimalloc")]
     eprintln!("using allocator: mimalloc");
@@ -110,9 +105,7 @@ fn check_options(opts: &mut Options) -> Result<()> {
         ClientType::HyperLegacy | ClientType::HyperRt1 | ClientType::Reqwest
             if opts.absolute_uri =>
         {
-            return Err(anyhow!(
-                "--absolute-uri is not available with this client!"
-            ));
+            return Err(anyhow!("--absolute-uri is not available with this client!"));
         }
 
         ClientType::Help => {
@@ -149,8 +142,6 @@ fn check_options(opts: &mut Options) -> Result<()> {
         }
         _ => (),
     }
-
-
 
     for uri in &opts.uri {
         if let Ok(parsed) = uri.parse::<http::Uri>()

@@ -46,10 +46,7 @@ pub async fn http_compio(
     let raw_bodies = opts
         .bodies()
         .unwrap_or_else(|e| fatal!(2, "could not read body: {e}"));
-    let headers = ensure_content_length(
-        headers,
-        raw_bodies.first().map(|b| b.len()).unwrap_or(0),
-    );
+    let headers = ensure_content_length(headers, raw_bodies.first().map(|b| b.len()).unwrap_or(0));
     let bodies: Vec<Full<Bytes>> = raw_bodies.into_iter().map(Full::new).collect::<Vec<_>>();
 
     let body = bodies

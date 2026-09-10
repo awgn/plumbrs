@@ -157,10 +157,7 @@ pub fn origin_form(uri: &http::Uri) -> http::Uri {
 
 #[inline]
 pub fn get_conn_address(opts: &Options, uri: &hyper::Uri) -> Option<(String, u16)> {
-    let host = uri
-        .host()
-        .map(String::from)
-        .or_else(|| opts.host.clone())?;
+    let host = uri.host().map(String::from).or_else(|| opts.host.clone())?;
     let default_port = match uri.scheme_str() {
         Some("https") => 443,
         _ if opts.http2 => 443,
@@ -562,7 +559,12 @@ mod tests {
 
     #[test]
     fn build_headers_http1_with_opts_host() {
-        let opts = Options::parse_from(["plumbrs", "--host", "virtual.host.com", "http://192.168.1.1:8080/api"]);
+        let opts = Options::parse_from([
+            "plumbrs",
+            "--host",
+            "virtual.host.com",
+            "http://192.168.1.1:8080/api",
+        ]);
         let uri: http::Uri = "http://192.168.1.1:8080/api".parse().unwrap();
         let headers = build_headers(&uri, &opts).unwrap();
         assert_eq!(headers.get(header::HOST).unwrap(), "virtual.host.com:8080");

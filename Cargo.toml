@@ -17,7 +17,7 @@ futures = "0.3.34"
 h2 = "0.4.19"
 http = "1.5.0"
 httparse = "1.10.1"
-hyper = { version = "1.11.0", features = ["full"] }
+hyper = { version = "1.11.1", features = ["full"] }
 pretty_env_logger = "0.5.0"
 tokio = { version = "1.53.1", features = ["full"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
@@ -28,26 +28,25 @@ http-body-util = "0.1.5"
 anyhow = "1.0.104"
 reqwest = { version = "0.13", features = ["stream"] }
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"] }
-rmcp = { version = "1.8", optional = true }
-rand = "0.8"
-atomic-time = "0.1.5"
+rmcp = { version = "3.2", optional = true }
+rand = "0.10"
+atomic-time = "0.2.1"
 scopeguard = "1.2.0"
 crossterm = "0.29"
 hdrhistogram = "7.6.0"
 futures-util = "0.3.34"
-tabled = "0.20"
+tabled = "0.22"
 http_wire = "0.7.1"
-ctor = "0.6.3"
 const_format = "0.2.36"
 quanta = "0.12.6"
 webpki-roots = "1"
-compio = { version = "0.18.0", optional = true, features = ["io", "net", "macros", "runtime"] }
+compio = { version = "0.19.2", optional = true, features = ["io", "net", "macros", "runtime"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tokio-uring = { version = "0.5.0", optional = true }
 monoio = { version = "0.2.4", optional = true, features = ["sync"] }
 
-io-uring = { version = "0.6.4", optional = true }
+io-uring = { version = "0.6", optional = true }
 
 [dependencies.mimalloc]
 version = "0.1"

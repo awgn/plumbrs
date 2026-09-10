@@ -115,10 +115,10 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
     let start = Instant::now();
     let coll = handles.into_iter().map(|h| h.join().expect("thread error"));
     let out: Vec<(Statistics, Metrics)> = coll.collect::<Result<Vec<_>, _>>()?;
-    
+
     // Total wall-clock time (including the remaining runtime overhead)
     let execution_time = start.elapsed().as_micros() as u64;
-    
+
     // For an exact Rate estimation, we neutralize the setup/teardown overhead
     // if a hard time limit was requested, by taking the minimum of the two targets.
     let duration = match opts.duration {
