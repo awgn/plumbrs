@@ -1,6 +1,6 @@
 [package]
 name = "plumbrs"
-version = "0.33.0"
+version = "0.34.0"
 edition = "2024"
 authors = ["Nicola Bonelli <nicola@larthia.com>"]
 description = "A high-performance HTTP/1.1 and HTTP/2 benchmarking tool"
@@ -63,8 +63,12 @@ compio = ["dep:compio"]
 mcp = ["dep:rmcp"]
 
 [profile.release]
-debug = false
-opt-level = 3
-strip = true
-codegen-units = 1
-lto = true
+codegen-units    = 1
+debug            = false
+debug-assertions = false
+incremental      = false
+opt-level        = 3
+overflow-checks  = false
+lto              = "fat"
+panic            = "abort"
+strip            = true
