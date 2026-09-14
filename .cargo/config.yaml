@@ -1,0 +1,6 @@
+[build]
+rustflags = [
+    # microarch (alternatively x86-64-v3)
+    "-C", "target-cpu=native",
+    "-C", "force-frame-pointers=no",
+] 
