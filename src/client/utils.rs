@@ -17,11 +17,14 @@ use crate::client::tls::{self, MaybeTlsStream};
 
 /// This macro prints a formatted message to stderr and then exits the process
 /// with the given exit code.
+/// It restores the terminal cursor first, as `std::process::exit` bypasses
+/// destructors (including the `HiddenCursor` guard in `main`).
 #[macro_export]
 macro_rules! fatal {
     ($exit_code:expr, $fmt:literal $(, $($arg:tt)*)?) => {
         {
             eprintln!($fmt $(, $($arg)*)?);
+            $crate::restore_cursor();
             std::process::exit($exit_code as i32);
         }
     };

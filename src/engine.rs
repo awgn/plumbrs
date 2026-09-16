@@ -28,7 +28,7 @@ use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
-use crossterm::{cursor, execute, terminal};
+use crossterm::{execute, terminal};
 use tokio::runtime::Builder;
 use tokio::task::JoinSet;
 
@@ -68,17 +68,34 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
 
     let clone_stats = Arc::clone(&rt_stats);
     meters.spawn(async move {
+        // Restore the cursor if the benchmark is interrupted: Ctrl+C on all
+        // platforms, SIGTERM on Unix (plain `kill`, `timeout`, systemd, ...).
         let ctrl_c_handle = tokio::spawn(async move {
             tokio::signal::ctrl_c().await.ok();
             // Restore cursor on Ctrl+C
-            let _ = execute!(std::io::stderr(), cursor::Show);
+            crate::restore_cursor();
             eprintln!();
             std::process::exit(0);
+        });
+        #[cfg(unix)]
+        let sigterm_handle = tokio::spawn(async move {
+            let mut sigterm =
+                match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+                    Ok(sig) => sig,
+                    Err(_) => return,
+                };
+            if sigterm.recv().await.is_some() {
+                crate::restore_cursor();
+                eprintln!();
+                std::process::exit(0);
+            }
         });
 
         meter(clone_stats).await;
 
         ctrl_c_handle.abort();
+        #[cfg(unix)]
+        sigterm_handle.abort();
     });
 
     let connections_per_instance = opts.connections / instances;

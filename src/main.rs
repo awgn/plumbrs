@@ -7,7 +7,6 @@ pub mod stats;
 use anyhow::{Result, anyhow};
 use clap::Parser;
 use client::ClientType;
-
 use crossterm::{cursor, execute};
 
 #[cfg(feature = "mimalloc")]
@@ -20,10 +19,6 @@ use crate::options::Options;
 static GLOBAL: MiMalloc = MiMalloc;
 
 fn main() -> Result<()> {
-    // Hide cursor and ensure it's restored on exit (including early returns via `?`)
-    _ = execute!(std::io::stderr(), cursor::Hide);
-    let _cursor_guard = scopeguard::guard((), |_| _ = execute!(std::io::stderr(), cursor::Show));
-
     #[cfg(feature = "mimalloc")]
     eprintln!("using allocator: mimalloc");
     #[cfg(not(feature = "mimalloc"))]
@@ -32,7 +27,34 @@ fn main() -> Result<()> {
     pretty_env_logger::init();
     let mut opts = Options::parse();
     check_options(&mut opts)?;
+
+    // Hide the cursor only while the live progress meter is running.
+    // Hiding it earlier would leak the hidden state through
+    // `std::process::exit` paths (e.g. clap errors), which bypass Drop.
+    let _hidden = HiddenCursor::hide();
+
     engine::run_tokio_engines(opts)
+}
+
+/// Show the terminal cursor again (best effort).
+pub fn restore_cursor() {
+    let _ = execute!(std::io::stderr(), cursor::Show);
+}
+
+/// RAII guard: hides the cursor when created, restores it on drop.
+struct HiddenCursor;
+
+impl HiddenCursor {
+    fn hide() -> Self {
+        let _ = execute!(std::io::stderr(), cursor::Hide);
+        HiddenCursor
+    }
+}
+
+impl Drop for HiddenCursor {
+    fn drop(&mut self) {
+        restore_cursor();
+    }
 }
 
 fn check_options(opts: &mut Options) -> Result<()> {
@@ -85,8 +107,7 @@ fn check_options(opts: &mut Options) -> Result<()> {
         }
         #[cfg(all(target_os = "linux", feature = "tokio_uring"))]
         ClientType::TokioUring if opts.uri.is_empty() => {
-            eprintln!("Missing URI. Try --help");
-            std::process::exit(1);
+            return Err(anyhow!("Missing URI. Try --help"));
         }
         ClientType::Auto
         | ClientType::HyperLegacy
@@ -95,8 +116,7 @@ fn check_options(opts: &mut Options) -> Result<()> {
         | ClientType::HyperH2
             if opts.uri.is_empty() =>
         {
-            eprintln!("Missing URI. Try --help");
-            std::process::exit(1);
+            return Err(anyhow!("Missing URI. Try --help"));
         }
 
         ClientType::Reqwest if opts.sni.is_some() => {
@@ -138,7 +158,7 @@ fn check_options(opts: &mut Options) -> Result<()> {
             println!("  monoio            - Monoio client, one per thread. Only HTTP/1");
             #[cfg(feature = "compio")]
             println!("  compio            - Compio client, one per thread. Only HTTP/1");
-            std::process::exit(0);
+            return Ok(());
         }
         _ => (),
     }
