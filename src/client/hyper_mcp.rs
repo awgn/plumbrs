@@ -1,7 +1,6 @@
 use crate::Options;
 use crate::stats::{RealtimeStats, Statistics};
 
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -14,7 +13,7 @@ use rmcp::model::{
     CallToolRequest, CallToolRequestParams, ClientCapabilities, ErrorCode, ErrorData,
     Implementation, InitializeRequest, InitializeRequestParams, InitializeResult,
     InitializedNotification, JsonObject, JsonRpcError, JsonRpcRequest, JsonRpcResponse,
-    ListToolsRequest, ListToolsResult, NumberOrString,
+    ListToolsRequest, ListToolsResult, NumberOrString, Tool,
 };
 use rmcp::serde_json::{self, Map, Value};
 
@@ -30,6 +29,9 @@ const MIME_TEXT_EVENT_STREAM: &str = "text/event-stream";
 /// Combined MIME types for Accept header (JSON and SSE)
 const MIME_APPLICATION_JSON_AND_EVENT_STREAM: &str =
     concatcp!(MIME_APPLICATION_JSON, ", ", MIME_TEXT_EVENT_STREAM);
+
+/// Header carrying the Streamable HTTP session identifier
+const HEADER_MCP_SESSION_ID: header::HeaderName = header::HeaderName::from_static("mcp-session-id");
 
 /// Result of MCP initialization: URI for requests and pre-compiled bodies for each tool
 #[derive(Debug, Default)]
@@ -66,14 +68,15 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
     let mut statistics = Statistics::new(opts.latency);
     let mut total: u32 = 0;
     let mut conn_req_count: u32;
-    let mut banner = HashSet::new();
+    // `uri_str` is fixed for the lifetime of this task, so a flag replaces the set.
+    let mut banner_shown = false;
     let uri_str = opts.uri[cid % opts.uri.len()].as_str();
     let mut uri = uri_str
         .parse::<hyper::Uri>()
         .unwrap_or_else(|e| fatal!(1, "invalid uri: {e}"));
 
     let (mut host, mut port) =
-        get_conn_address(&opts, &uri).unwrap_or_else(|| fatal!(1, "no host specified in uri"));
+        get_conn_address(opts, &uri).unwrap_or_else(|| fatal!(1, "no host specified in uri"));
     let mut endpoint = build_conn_endpoint(&host, port);
 
     let mut headers =
@@ -82,7 +85,7 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
     // For SSE transport, initialize before connection loop
     let mut mcp = McpSetup::default();
     if opts.mcp_sse {
-        mcp = mcp_sse_initialize::<B>(&uri_str, opts, &headers).await;
+        mcp = mcp_sse_initialize::<B>(uri_str, opts, &headers).await;
         uri = mcp.uri;
 
         if opts.host.is_none() {
@@ -118,15 +121,25 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
         "streamableHttp"
     };
 
+    // Pre-build the connection-closing header set once: the hot loop then only
+    // clones the matching set instead of cloning + inserting per request.
+    let mut headers_close = headers.clone();
+    headers_close.insert(
+        header::CONNECTION,
+        header::HeaderValue::from_static("close"),
+    );
+
     let clock = quanta::Clock::new();
     let start = Instant::now();
+    // Wrapping cursor over `mcp.tool_bodies`: avoids a division per request.
+    let mut body_idx: usize = 0;
     'connection: loop {
-        if should_stop(total, start, &opts) {
+        if should_stop(total, start, opts) {
             break 'connection;
         }
 
-        if cid < opts.uri.len() && !banner.contains(uri_str) {
-            banner.insert(uri_str.to_owned());
+        if cid < opts.uri.len() && !banner_shown {
+            banner_shown = true;
             eprintln!(
                 "hyper-mcp [{tid:>2}] -> connecting to {}:{}, method = POST uri = {} {} (transport {transport})...",
                 host,
@@ -141,7 +154,7 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
             tls_server_name(opts, &uri),
             &mut statistics,
             rt_stats,
-            &opts,
+            opts,
         )
         .await
         {
@@ -163,9 +176,15 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
                     // Add session ID to headers for subsequent requests
                     if let Some(ref session_id) = mcp.session_id {
                         headers.insert(
-                            http::header::HeaderName::from_static("mcp-session-id"),
+                            HEADER_MCP_SESSION_ID.clone(),
                             http::header::HeaderValue::from_str(session_id)
                                 .unwrap_or_else(|e| fatal!(3, "invalid session id: {e}")),
+                        );
+                        // Keep the pre-built closing set in sync.
+                        headers_close.clone_from(&headers);
+                        headers_close.insert(
+                            header::CONNECTION,
+                            header::HeaderValue::from_static("close"),
                         );
                     }
                 }
@@ -175,30 +194,31 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
             }
         }
 
-        let bodies: Vec<Full<Bytes>> = mcp.tool_bodies.clone().into_iter().map(Full::new).collect();
-
         loop {
-            let body = bodies
-                .get(total as usize % bodies.len())
-                .cloned()
-                .unwrap_or_else(|| Full::new(Bytes::from("")));
+            // Round-robin over the pre-compiled tool bodies without modulo.
+            let body = if mcp.tool_bodies.is_empty() {
+                Full::new(Bytes::new())
+            } else {
+                if body_idx >= mcp.tool_bodies.len() {
+                    body_idx = 0;
+                }
+                let body = Full::new(mcp.tool_bodies[body_idx].clone());
+                body_idx += 1;
+                body
+            };
 
             conn_req_count += 1;
             let is_last = conn_req_count >= opts.rpc;
-
-            let mut req_headers = headers.clone();
-            if is_last {
-                req_headers.insert(
-                    header::CONNECTION,
-                    header::HeaderValue::from_static("close"),
-                );
-            }
 
             let mut req = Request::new(body);
             // MCP JSON-RPC requests must use POST method
             *req.method_mut() = http::Method::POST;
             *req.uri_mut() = req_uri.clone();
-            *req.headers_mut() = req_headers;
+            *req.headers_mut() = if is_last {
+                headers_close.clone()
+            } else {
+                headers.clone()
+            };
 
             let start_lat = opts.latency.then_some(clock.raw());
 
@@ -229,7 +249,7 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
 
             total += 1;
 
-            if should_stop(total, start, &opts) {
+            if should_stop(total, start, opts) {
                 break 'connection;
             }
 
@@ -255,21 +275,109 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
     statistics
 }
 
+/// Sends a JSON-RPC request over an established sender and returns the response.
+async fn post_json<S>(
+    sender: &mut S,
+    req_uri: &hyper::Uri,
+    headers: &HeaderMap,
+    body: Vec<u8>,
+    context: &'static str,
+) -> Result<http::Response<hyper::body::Incoming>, Box<dyn std::error::Error + Send + Sync>>
+where
+    S: RequestSender<Full<Bytes>>,
+{
+    let mut req = Request::new(Full::new(Bytes::from(body)));
+    *req.method_mut() = http::Method::POST;
+    *req.uri_mut() = req_uri.clone();
+    *req.headers_mut() = headers.clone();
+
+    sender
+        .ready()
+        .await
+        .map_err(|e| format!("{context}: sender not ready: {e}"))?;
+    sender
+        .send_request(req)
+        .await
+        .map_err(|e| format!("{context} failed: {e}").into())
+}
+
+/// Collects a JSON-RPC response body, transparently unwrapping SSE framing.
+///
+/// Returns the raw JSON bytes: `serde_json::from_slice` can parse them without
+/// an intermediate UTF-8 validation copy.
+async fn collect_json_body(
+    response: http::Response<hyper::body::Incoming>,
+    context: &'static str,
+) -> Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+    let is_sse = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|ct| ct.contains(MIME_TEXT_EVENT_STREAM));
+
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .map_err(|e| format!("failed to read {context} response body: {e}"))?
+        .to_bytes();
+
+    if is_sse {
+        extract_sse_data(&String::from_utf8_lossy(&body)).map(Bytes::from)
+    } else {
+        Ok(body)
+    }
+}
+
+/// Pre-compiles a `tools/call` JSON-RPC body per tool, sharing one RNG.
+fn compile_tool_bodies(tools: &[Tool], opts: &Options) -> Vec<Bytes> {
+    let mut rng = rand::rng();
+    tools
+        .iter()
+        .enumerate()
+        .map(|(idx, tool)| {
+            let call_params = match create_tool_request(&tool.input_schema, opts, &mut rng) {
+                Some(args) => CallToolRequestParams::new(tool.name.clone()).with_arguments(args),
+                None => CallToolRequestParams::new(tool.name.clone()),
+            };
+
+            let call_request = CallToolRequest::new(call_params);
+
+            let call_jsonrpc = JsonRpcRequest {
+                jsonrpc: Default::default(),
+                id: NumberOrString::Number((idx + 100) as i64),
+                request: call_request,
+            };
+
+            serde_json::to_vec(&call_jsonrpc)
+                .unwrap_or_else(|e| {
+                    fatal!(
+                        3,
+                        "failed to serialize tools/call request for {}: {e}",
+                        tool.name
+                    )
+                })
+                .into()
+        })
+        .collect()
+}
+
 /// Generates a tool request with fuzzy values based on the input schema.
 /// Returns None if the schema is invalid or missing required fields.
-fn create_tool_request(arguments: &Arc<JsonObject>, opts: &Options) -> Option<Map<String, Value>> {
-    let required = arguments.get("required").and_then(|v| v.as_array())?;
-    let properties = arguments.get("properties").and_then(|v| v.as_object())?;
+fn create_tool_request<R: RngExt>(
+    arguments: &JsonObject,
+    opts: &Options,
+    rng: &mut R,
+) -> Option<Map<String, Value>> {
+    let required = arguments.get("required")?.as_array()?;
+    let properties = arguments.get("properties")?.as_object()?;
 
-    let mut generated_request_args = Map::new();
-    let mut rng = rand::rng();
+    let mut generated_request_args = Map::with_capacity(required.len());
 
-    for required_arg in required {
-        let field_name = required_arg.as_str()?;
+    for field_name in required.iter().filter_map(|v| v.as_str()) {
         let field_schema = properties.get(field_name)?;
-
-        let value = generate_value_from_schema(field_schema, &mut rng, opts, 0);
-        generated_request_args.insert(field_name.to_string(), value);
+        let value = generate_value_from_schema(field_schema, rng, opts, 0);
+        generated_request_args.insert(field_name.to_owned(), value);
     }
 
     Some(generated_request_args)
@@ -291,51 +399,86 @@ fn generate_value_from_schema<R: RngExt>(
     if let Some(default) = schema.get("default") {
         return default.clone();
     }
+    if let Some(c) = schema.get("const") {
+        return c.clone();
+    }
+    if let Some(variants) = schema.get("enum").and_then(|v| v.as_array())
+        && !variants.is_empty()
+    {
+        return variants[rng.random_range(0..variants.len())].clone();
+    }
 
-    let type_str = schema
-        .get("type")
-        .and_then(|t| t.as_str())
-        .unwrap_or("string");
+    // `type` may be a single name or an array (e.g. ["string", "null"]);
+    // pick the first non-null member without allocating.
+    let type_str: &str = match schema.get("type") {
+        Some(Value::String(s)) => s.as_str(),
+        Some(Value::Array(types)) => types
+            .iter()
+            .filter_map(Value::as_str)
+            .find(|t| *t != "null")
+            .unwrap_or("string"),
+        _ => "string",
+    };
 
     match type_str {
         "string" => {
             let len = opts
                 .mcp_rand_string_len
                 .unwrap_or_else(|| rng.random_range(5..20));
-            let s: String = (0..len)
-                .map(|_| rng.sample(rand::distr::Alphanumeric) as char)
-                .collect();
+            let mut s = String::with_capacity(len);
+            for _ in 0..len {
+                s.push(rng.sample(rand::distr::Alphanumeric) as char);
+            }
             Value::String(s)
         }
-        "number" => Value::Number(rng.random_range(-1000..1000i64).into()),
-        "integer" => Value::Number(rng.random_range(0..1000).into()),
+        "integer" => {
+            let lo = schema.get("minimum").and_then(Value::as_i64).unwrap_or(0);
+            let hi = schema
+                .get("maximum")
+                .and_then(Value::as_i64)
+                .unwrap_or(1000);
+            let (lo, hi) = if hi > lo { (lo, hi) } else { (0, 1000) };
+            Value::from(rng.random_range(lo..hi))
+        }
+        "number" => {
+            let lo = schema
+                .get("minimum")
+                .and_then(Value::as_f64)
+                .unwrap_or(-1000.0);
+            let hi = schema
+                .get("maximum")
+                .and_then(Value::as_f64)
+                .unwrap_or(1000.0);
+            let (lo, hi) = if hi > lo { (lo, hi) } else { (-1000.0, 1000.0) };
+            Value::from(rng.random_range(lo..hi))
+        }
         "boolean" => Value::Bool(rng.random_bool(0.5)),
         "array" => {
             let len = rng.random_range(1..4);
             let items_schema = schema.get("items");
-            let items: Vec<Value> = (0..len)
-                .map(|_| {
-                    items_schema
-                        .map(|s| generate_value_from_schema(s, rng, opts, depth + 1))
-                        .unwrap_or_else(|| generate_primitive_value(rng))
-                })
-                .collect();
+            let mut items = Vec::with_capacity(len);
+            for _ in 0..len {
+                items.push(match items_schema {
+                    Some(s) => generate_value_from_schema(s, rng, opts, depth + 1),
+                    None => generate_primitive_value(rng),
+                });
+            }
             Value::Array(items)
         }
         "object" => {
-            let mut obj = Map::new();
-            if let Some(properties) = schema.get("properties").and_then(|p| p.as_object()) {
-                if let Some(required) = schema.get("required").and_then(|r| r.as_array()) {
-                    // Generate values for required properties
-                    for required_field in required {
-                        if let Some(field_name) = required_field.as_str() {
-                            if let Some(field_schema) = properties.get(field_name) {
-                                let value =
-                                    generate_value_from_schema(field_schema, rng, opts, depth + 1);
-                                obj.insert(field_name.to_string(), value);
-                            }
-                        }
-                    }
+            let Some(properties) = schema.get("properties").and_then(|p| p.as_object()) else {
+                return Value::Object(Map::new());
+            };
+            let Some(required) = schema.get("required").and_then(|r| r.as_array()) else {
+                return Value::Object(Map::new());
+            };
+            let mut obj = Map::with_capacity(required.len());
+            for field_name in required.iter().filter_map(|v| v.as_str()) {
+                if let Some(field_schema) = properties.get(field_name) {
+                    obj.insert(
+                        field_name.to_owned(),
+                        generate_value_from_schema(field_schema, rng, opts, depth + 1),
+                    );
                 }
             }
             Value::Object(obj)
@@ -343,7 +486,7 @@ fn generate_value_from_schema<R: RngExt>(
         "null" => Value::Null,
         _ => {
             // Unknown type, default to string
-            Value::String("".to_string())
+            Value::String(String::new())
         }
     }
 }
@@ -352,11 +495,10 @@ fn generate_value_from_schema<R: RngExt>(
 /// Used as a fallback for array items without a defined schema.
 fn generate_primitive_value<R: RngExt>(rng: &mut R) -> Value {
     match rng.random_range(0..4) {
-        0 => Value::String("sample".to_string()),
-        1 => Value::Number(rng.random_range(-100..100i64).into()),
-        2 => Value::Number(rng.random_range(0..100).into()),
-        3 => Value::Bool(rng.random_bool(0.5)),
-        _ => Value::Null,
+        0 => Value::from("sample"),
+        1 => Value::from(rng.random_range(-100..100i64)),
+        2 => Value::from(rng.random_range(0..100i64)),
+        _ => Value::Bool(rng.random_bool(0.5)),
     }
 }
 
@@ -393,22 +535,14 @@ where
     let init_body = serde_json::to_vec(&init_jsonrpc)?;
     let req_uri = request_uri(uri, opts.absolute_uri || opts.http2);
 
-    let mut req = Request::new(Full::new(Bytes::from(init_body)));
-    *req.method_mut() = http::Method::POST;
-    *req.uri_mut() = req_uri.clone();
-    *req.headers_mut() = base_headers.clone();
+    let response = post_json(sender, &req_uri, base_headers, init_body, "initialize").await?;
 
-    let response = sender
-        .send_request(req)
-        .await
-        .map_err(|e| format!("initialize request failed: {e}"))?;
-
-    // Extract session ID from response headers
+    // Extract session ID from response headers before consuming the body
     let session_id = response
         .headers()
-        .get("mcp-session-id")
+        .get(HEADER_MCP_SESSION_ID.clone())
         .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
+        .map(|s| s.to_owned());
 
     if response.status() != StatusCode::OK {
         return Err(format!(
@@ -418,32 +552,8 @@ where
         .into());
     }
 
-    // Check content-type to determine how to parse response
-    let content_type = response
-        .headers()
-        .get(http::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or(MIME_APPLICATION_JSON)
-        .to_string();
-
-    // Read response body
-    let body_bytes = response
-        .into_body()
-        .collect()
-        .await
-        .map_err(|e| format!("failed to read initialize response body: {e}"))?
-        .to_bytes();
-
-    // Parse JSON - either directly or from SSE data field
-    let json_body = if content_type.contains(MIME_TEXT_EVENT_STREAM) {
-        // Parse SSE format: extract JSON from "data:" line
-        let body_str = String::from_utf8_lossy(&body_bytes);
-        extract_sse_data(&body_str)?
-    } else {
-        String::from_utf8_lossy(&body_bytes).to_string()
-    };
-
-    let _init_result: JsonRpcResponse<InitializeResult> = serde_json::from_str(&json_body)
+    let body = collect_json_body(response, "initialize").await?;
+    let _init_result: JsonRpcResponse<InitializeResult> = serde_json::from_slice(&body)
         .map_err(|e| format!("failed to parse initialize response: {e}"))?;
 
     eprintln!(
@@ -455,7 +565,7 @@ where
     let mut headers_with_session = base_headers.clone();
     if let Some(ref sid) = session_id {
         headers_with_session.insert(
-            http::header::HeaderName::from_static("mcp-session-id"),
+            HEADER_MCP_SESSION_ID.clone(),
             http::header::HeaderValue::from_str(sid)?,
         );
     }
@@ -470,27 +580,20 @@ where
 
     let initialized_body = serde_json::to_vec(&notif_jsonrpc)?;
 
-    let mut req = Request::new(Full::new(Bytes::from(initialized_body)));
-    *req.method_mut() = http::Method::POST;
-    *req.uri_mut() = req_uri.clone();
-    *req.headers_mut() = headers_with_session.clone();
-
-    // Wait for sender to be ready
-    sender
-        .ready()
-        .await
-        .map_err(|e| format!("sender not ready: {e}"))?;
-
-    let response = sender
-        .send_request(req)
-        .await
-        .map_err(|e| format!("initialized notification failed: {e}"))?;
+    let response = post_json(
+        sender,
+        &req_uri,
+        &headers_with_session,
+        initialized_body,
+        "initialized notification",
+    )
+    .await?;
 
     // Notification may return 200 OK, 202 Accepted, or 204 No Content
-    if response.status() != StatusCode::OK
-        && response.status() != StatusCode::ACCEPTED
-        && response.status() != StatusCode::NO_CONTENT
-    {
+    if !matches!(
+        response.status(),
+        StatusCode::OK | StatusCode::ACCEPTED | StatusCode::NO_CONTENT
+    ) {
         return Err(format!(
             "initialized notification failed with status: {}",
             response.status()
@@ -512,21 +615,14 @@ where
 
     let tools_list_body = serde_json::to_vec(&tools_list_jsonrpc)?;
 
-    let mut req = Request::new(Full::new(Bytes::from(tools_list_body)));
-    *req.method_mut() = http::Method::POST;
-    *req.uri_mut() = req_uri.clone();
-    *req.headers_mut() = headers_with_session.clone();
-
-    // Wait for sender to be ready
-    sender
-        .ready()
-        .await
-        .map_err(|e| format!("sender not ready: {e}"))?;
-
-    let response = sender
-        .send_request(req)
-        .await
-        .map_err(|e| format!("tools/list request failed: {e}"))?;
+    let response = post_json(
+        sender,
+        &req_uri,
+        &headers_with_session,
+        tools_list_body,
+        "tools/list",
+    )
+    .await?;
 
     if response.status() != StatusCode::OK {
         return Err(format!(
@@ -536,31 +632,8 @@ where
         .into());
     }
 
-    // Check content-type to determine how to parse response
-    let content_type = response
-        .headers()
-        .get(http::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or(MIME_APPLICATION_JSON)
-        .to_string();
-
-    // Read and parse tools/list response
-    let body_bytes = response
-        .into_body()
-        .collect()
-        .await
-        .map_err(|e| format!("failed to read tools/list response body: {e}"))?
-        .to_bytes();
-
-    // Parse JSON - either directly or from SSE data field
-    let json_body = if content_type.contains(MIME_TEXT_EVENT_STREAM) {
-        let body_str = String::from_utf8_lossy(&body_bytes);
-        extract_sse_data(&body_str)?
-    } else {
-        String::from_utf8_lossy(&body_bytes).to_string()
-    };
-
-    let tools_result: JsonRpcResponse<ListToolsResult> = serde_json::from_str(&json_body)
+    let body = collect_json_body(response, "tools/list").await?;
+    let tools_result: JsonRpcResponse<ListToolsResult> = serde_json::from_slice(&body)
         .map_err(|e| format!("failed to parse tools/list response: {e}"))?;
 
     let tools = &tools_result.result.tools;
@@ -576,34 +649,7 @@ where
     );
 
     // Step 4: Pre-compile JSON bodies for each tool's tools/call invocation
-    let tool_bodies: Vec<Bytes> = tools
-        .iter()
-        .enumerate()
-        .map(|(idx, tool)| {
-            let call_params = if let Some(args) = create_tool_request(&tool.input_schema, opts) {
-                CallToolRequestParams::new(tool.name.clone()).with_arguments(args)
-            } else {
-                CallToolRequestParams::new(tool.name.clone())
-            };
-
-            let call_request = CallToolRequest::new(call_params);
-
-            let call_jsonrpc = JsonRpcRequest {
-                jsonrpc: Default::default(),
-                id: NumberOrString::Number((idx + 100) as i64),
-                request: call_request,
-            };
-
-            let json = serde_json::to_vec(&call_jsonrpc).unwrap_or_else(|e| {
-                fatal!(
-                    3,
-                    "failed to serialize tools/call request for {}: {e}",
-                    tool.name
-                )
-            });
-            Bytes::from(json)
-        })
-        .collect();
+    let tool_bodies = compile_tool_bodies(tools, opts);
 
     Ok(McpSetup {
         uri: uri.clone(),
@@ -615,14 +661,13 @@ where
 
 /// Extract JSON data from SSE format response (accumulating multiple data lines)
 fn extract_sse_data(body: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let mut buffer = String::new();
+    let mut buffer = String::with_capacity(body.len());
     let mut found = false;
 
     for line in body.lines() {
         if let Some(rest) = line.strip_prefix("data:") {
             found = true;
-            let content = rest.strip_prefix(' ').unwrap_or(rest);
-            buffer.push_str(content);
+            buffer.push_str(rest.strip_prefix(' ').unwrap_or(rest));
             buffer.push('\n');
         }
     }
@@ -640,34 +685,43 @@ async fn read_sse_event(
     body: &mut hyper::body::Incoming,
     buffer: &mut String,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let mut event_data = String::new();
+    let mut event_data = String::with_capacity(256);
 
     loop {
         if let Some(idx) = buffer.find('\n') {
-            let line_full: String = buffer.drain(..=idx).collect();
-            let line = line_full.trim_end();
-
-            if line.is_empty() {
-                if !event_data.is_empty() {
-                    return Ok(event_data);
+            // Borrow the line, copy its payload into `event_data`, then drain.
+            // This avoids the per-line String allocation of drain-then-collect.
+            // (`\n` is single-byte: slicing a UTF-8 String at its index is safe.)
+            let empty_line = {
+                let line = buffer[..idx].trim_end();
+                if line.is_empty() {
+                    true
+                } else {
+                    if let Some(rest) = line.strip_prefix("data:") {
+                        event_data.push_str(rest.strip_prefix(' ').unwrap_or(rest));
+                        event_data.push('\n');
+                    }
+                    // ignore other fields like event:, id:, retry:
+                    false
                 }
-                // heartbeat or empty event, continue reading
-                continue;
+            };
+            buffer.drain(..=idx);
+            if empty_line && !event_data.is_empty() {
+                return Ok(event_data);
             }
-
-            if let Some(rest) = line.strip_prefix("data:") {
-                let content = rest.strip_prefix(' ').unwrap_or(rest);
-                event_data.push_str(content);
-                event_data.push('\n');
-            }
-            // ignore other fields like event:, id:, retry:
+            // heartbeat or empty event: keep reading
             continue;
         }
 
         match body.frame().await {
             Some(Ok(frame)) => {
                 if let Some(chunk) = frame.data_ref() {
-                    buffer.push_str(&String::from_utf8_lossy(chunk));
+                    // Fast path: SSE payloads are UTF-8; only fall back to
+                    // lossy conversion for invalid sequences.
+                    match std::str::from_utf8(chunk) {
+                        Ok(s) => buffer.push_str(s),
+                        Err(_) => buffer.push_str(&String::from_utf8_lossy(chunk)),
+                    }
                 }
             }
             Some(Err(e)) => return Err(format!("SSE read error: {e}").into()),
@@ -764,33 +818,16 @@ where
             .await
             .unwrap_or_else(|| fatal!(3, "POST connection failed"));
 
-    // Helper function to send POST request
-    async fn send_post<S>(
-        uri: &hyper::Uri,
-        headers: &HeaderMap,
-        body: Vec<u8>,
-        sender: &mut S,
-    ) -> http::Response<hyper::body::Incoming>
+    // POST a JSON-RPC message and drain its (usually empty) response body so
+    // the connection is reusable for the next message.
+    async fn send_post<S>(uri: &hyper::Uri, headers: &HeaderMap, body: Vec<u8>, sender: &mut S)
     where
         S: RequestSender<Full<Bytes>>,
     {
-        let mut req_builder = Request::builder()
-            .method(http::Method::POST)
-            .uri(uri.clone())
-            .header(http::header::CONTENT_TYPE, MIME_APPLICATION_JSON);
-
-        for (key, value) in headers.iter() {
-            req_builder = req_builder.header(key, value);
-        }
-
-        let req = req_builder
-            .body(Full::new(Bytes::from(body)))
-            .unwrap_or_else(|e| fatal!(3, "failed to build POST request: {e}"));
-
-        sender
-            .send_request(req)
+        let response = post_json(sender, uri, headers, body, "POST")
             .await
-            .unwrap_or_else(|e| fatal!(3, "POST request failed: {e}"))
+            .unwrap_or_else(|e| fatal!(3, "POST request failed: {e}"));
+        let _ = response.into_body().collect().await;
     }
 
     // Step 2: Send MCP initialize request (no client capabilities: roots was removed by SEP-2577)
@@ -811,7 +848,7 @@ where
         .unwrap_or_else(|e| fatal!(3, "failed to serialize initialize request: {e}"));
 
     // Send the initialize request via POST
-    let _ = send_post(&post_uri, headers, init_body, &mut post_sender).await;
+    send_post(&post_uri, headers, init_body, &mut post_sender).await;
 
     // Read the initialize response from the SSE stream
     let init_response_body = read_sse_event(&mut sse_body, &mut buffer)
@@ -837,7 +874,7 @@ where
     let initialized_body = serde_json::to_vec(&notif_jsonrpc)
         .unwrap_or_else(|e| fatal!(3, "failed to serialize initialized notification: {e}"));
 
-    let _ = send_post(&post_uri, headers, initialized_body, &mut post_sender).await;
+    send_post(&post_uri, headers, initialized_body, &mut post_sender).await;
 
     // Step 4: Send tools/list request
     let tools_list_request = ListToolsRequest::default();
@@ -852,7 +889,7 @@ where
         .unwrap_or_else(|e| fatal!(3, "failed to serialize tools/list request: {e}"));
 
     // Send the request via POST
-    let _ = send_post(&post_uri, headers, tools_list_body, &mut post_sender).await;
+    send_post(&post_uri, headers, tools_list_body, &mut post_sender).await;
 
     // Read the response from the SSE stream, handling any server requests (like roots/list)
     let tools_response_body;
@@ -862,38 +899,44 @@ where
             .await
             .unwrap_or_else(|e| fatal!(3, "failed to read SSE event (tools/list): {e}"));
 
+        // Fast path: JSON-RPC responses carry no "method" member.
+        if !data.contains("\"method\"") {
+            tools_response_body = data;
+            break;
+        }
+
         // Check if this is a server request (has "method" and "id")
         if let Ok(server_req) = serde_json::from_str::<serde_json::Value>(&data) {
-            if let Some(method) = server_req.get("method").and_then(|m| m.as_str()) {
-                if let Some(req_id) = server_req.get("id") {
-                    // Roots were removed by SEP-2577, so we don't advertise the
-                    // capability; answer legacy servers with MethodNotFound.
-                    if method == "roots/list" {
-                        let roots_error = JsonRpcError::new(
-                            Some(
-                                req_id
-                                    .as_i64()
-                                    .map(NumberOrString::Number)
-                                    .or_else(|| {
-                                        req_id.as_str().map(|s| NumberOrString::String(s.into()))
-                                    })
-                                    .unwrap_or(NumberOrString::Number(0)),
-                            ),
-                            ErrorData::new(
-                                ErrorCode::METHOD_NOT_FOUND,
-                                "roots/list is not supported (removed by SEP-2577)",
-                                None,
-                            ),
-                        );
+            if let Some(method) = server_req.get("method").and_then(|m| m.as_str())
+                && let Some(req_id) = server_req.get("id")
+            {
+                // Roots were removed by SEP-2577, so we don't advertise the
+                // capability; answer legacy servers with MethodNotFound.
+                if method == "roots/list" {
+                    let roots_error = JsonRpcError::new(
+                        Some(
+                            req_id
+                                .as_i64()
+                                .map(NumberOrString::Number)
+                                .or_else(|| {
+                                    req_id.as_str().map(|s| NumberOrString::String(s.into()))
+                                })
+                                .unwrap_or(NumberOrString::Number(0)),
+                        ),
+                        ErrorData::new(
+                            ErrorCode::METHOD_NOT_FOUND,
+                            "roots/list is not supported (removed by SEP-2577)",
+                            None,
+                        ),
+                    );
 
-                        let roots_body = serde_json::to_vec(&roots_error).unwrap_or_else(|e| {
-                            fatal!(3, "failed to serialize roots/list response: {e}")
-                        });
+                    let roots_body = serde_json::to_vec(&roots_error).unwrap_or_else(|e| {
+                        fatal!(3, "failed to serialize roots/list response: {e}")
+                    });
 
-                        let _ = send_post(&post_uri, headers, roots_body, &mut post_sender).await;
+                    send_post(&post_uri, headers, roots_body, &mut post_sender).await;
 
-                        continue; // Keep reading for tools/list response
-                    }
+                    continue; // Keep reading for tools/list response
                 }
             }
 
@@ -922,34 +965,7 @@ where
     );
 
     // Step 5: Pre-compile JSON bodies for each tool's tools/call invocation
-    let tool_bodies: Vec<Bytes> = tools
-        .iter()
-        .enumerate()
-        .map(|(idx, tool)| {
-            let call_params = if let Some(args) = create_tool_request(&tool.input_schema, opts) {
-                CallToolRequestParams::new(tool.name.clone()).with_arguments(args)
-            } else {
-                CallToolRequestParams::new(tool.name.clone())
-            };
-
-            let call_request = CallToolRequest::new(call_params);
-
-            let call_jsonrpc = JsonRpcRequest {
-                jsonrpc: Default::default(),
-                id: NumberOrString::Number((idx + 100) as i64),
-                request: call_request,
-            };
-
-            let json = serde_json::to_vec(&call_jsonrpc).unwrap_or_else(|e| {
-                fatal!(
-                    3,
-                    "failed to serialize tools/call request for {}: {e}",
-                    tool.name
-                )
-            });
-            Bytes::from(json)
-        })
-        .collect();
+    let tool_bodies = compile_tool_bodies(tools, opts);
 
     // Spawn task to keep SSE connection alive
     let sse_task = tokio::spawn(async move {
