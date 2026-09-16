@@ -1,6 +1,6 @@
 [package]
 name = "plumbrs"
-version = "0.34.1"
+version = "0.35.0"
 edition = "2024"
 authors = ["Nicola Bonelli <nicola@larthia.com>"]
 description = "A high-performance HTTP/1.1 and HTTP/2 benchmarking tool"
@@ -36,7 +36,7 @@ crossterm = "0.29"
 hdrhistogram = "7.6.0"
 futures-util = "0.3.34"
 tabled = "0.22"
-http_wire = "0.7.1"
+http_wire = "0.8.0"
 const_format = "0.2.36"
 quanta = "0.12.6"
 webpki-roots = "1"
