@@ -2,6 +2,7 @@ pub mod client;
 pub mod engine;
 pub mod metrics;
 pub mod options;
+pub mod rss;
 pub mod stats;
 
 use anyhow::{Result, anyhow};
@@ -205,6 +206,8 @@ fn check_options(opts: &mut Options) -> Result<()> {
             "The number of threads must be an exact multiple of the thread count for each individual runtime"
         ));
     }
+
+    crate::rss::init_source_ports(opts)?;
 
     Ok(())
 }

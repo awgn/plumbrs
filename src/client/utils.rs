@@ -187,17 +187,99 @@ pub fn build_conn_endpoint(host: &String, port: u16) -> &'static str {
     Box::leak(format!("{}:{}", host, port).into_boxed_str())
 }
 
+/// Open a TCP connection, optionally binding a source address first.
+///
+/// With an empty `locals` the kernel picks the source IP and an ephemeral
+/// port (previous behavior). Otherwise each candidate is tried in order until
+/// one connects; `AddrInUse`/`AddrNotAvailable` moves on to the next
+/// candidate so a busy port does not fail the connection.
+async fn connect_tcp(
+    endpoint: &str,
+    locals: &[std::net::SocketAddr],
+) -> std::io::Result<TcpStream> {
+    if locals.is_empty() {
+        let stream = TcpStream::connect(endpoint).await?;
+        stream.set_nodelay(true)?;
+        return Ok(stream);
+    }
+
+    let mut remotes: Vec<std::net::SocketAddr> =
+        tokio::net::lookup_host(endpoint).await?.collect();
+    if remotes.is_empty() {
+        return Err(std::io::Error::other(format!(
+            "cannot resolve '{endpoint}'"
+        )));
+    }
+    // Prefer a remote matching the requested local family.
+    if let Some(local) = locals.first()
+        && let Some(pos) = remotes.iter().position(|r| r.is_ipv4() == local.is_ipv4())
+    {
+        remotes.swap(0, pos);
+    }
+    let remote = remotes[0];
+
+    let mut last_err = None;
+    for local in locals {
+        // A wildcard local follows the remote family (e.g. 0.0.0.0 vs [::]).
+        let mut bind = *local;
+        if bind.ip().is_unspecified() && bind.is_ipv4() != remote.is_ipv4() {
+            bind = std::net::SocketAddr::new(
+                if remote.is_ipv4() {
+                    std::net::IpAddr::from([0, 0, 0, 0])
+                } else {
+                    std::net::IpAddr::from([0u16; 8])
+                },
+                bind.port(),
+            );
+        }
+        let socket = match bind {
+            std::net::SocketAddr::V4(_) => tokio::net::TcpSocket::new_v4(),
+            std::net::SocketAddr::V6(_) => tokio::net::TcpSocket::new_v6(),
+        };
+        let socket = match socket {
+            Ok(s) => s,
+            Err(e) => {
+                last_err = Some(e);
+                continue;
+            }
+        };
+        // Allow quick reuse of ports stuck in TIME_WAIT (matters with --rpc).
+        let _ = socket.set_reuseaddr(true);
+        if let Err(e) = socket.bind(bind) {
+            last_err = Some(e);
+            continue;
+        }
+        match socket.connect(remote).await {
+            Ok(stream) => {
+                stream.set_nodelay(true)?;
+                return Ok(stream);
+            }
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::AddrInUse | std::io::ErrorKind::AddrNotAvailable
+                ) =>
+            {
+                last_err = Some(e);
+                continue;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last_err.unwrap_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::AddrInUse, "no usable source port")
+    }))
+}
+
 pub async fn connect_stream(
     endpoint: &str,
     tls_server_name: Option<&str>,
     http2: bool,
     stats: &mut Statistics,
     rt_stats: &RealtimeStats,
+    locals: &[std::net::SocketAddr],
 ) -> Option<MaybeTlsStream> {
-    let stream_res = TcpStream::connect(endpoint)
-        .await
-        .and_then(|s| s.set_nodelay(true).map(|_| s));
-    let tcp = match stream_res {
+    let tcp = match connect_tcp(endpoint, locals).await {
         Ok(s) => s,
         Err(ref err) => {
             stats.set_error(err, rt_stats);
@@ -282,6 +364,7 @@ pub trait HttpConnectionBuilder {
         stats: &mut Statistics,
         rt_stats: &RealtimeStats,
         _opts: &Options,
+        locals: &[std::net::SocketAddr],
     ) -> impl Future<Output = Option<(Self::Sender<B>, tokio::task::JoinHandle<()>)>>
     where
         B: Body + Send + Unpin + 'static,
@@ -305,13 +388,15 @@ impl HttpConnectionBuilder for Http1 {
         stats: &mut Statistics,
         rt_stats: &RealtimeStats,
         opts: &Options,
+        locals: &[std::net::SocketAddr],
     ) -> Option<(Self::Sender<B>, tokio::task::JoinHandle<()>)>
     where
         B: Body + Send + Unpin + 'static,
         B::Data: Send,
         B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     {
-        let stream = connect_stream(endpoint, tls_server_name, false, stats, rt_stats).await?;
+        let stream =
+            connect_stream(endpoint, tls_server_name, false, stats, rt_stats, locals).await?;
         let stream = TokioIo::new(stream);
         let mut builder = conn1::Builder::new();
 
@@ -381,13 +466,15 @@ impl HttpConnectionBuilder for Http2 {
         stats: &mut Statistics,
         rt_stats: &RealtimeStats,
         opts: &Options,
+        locals: &[std::net::SocketAddr],
     ) -> Option<(Self::Sender<B>, tokio::task::JoinHandle<()>)>
     where
         B: Body + Send + 'static + Unpin,
         B::Data: Send,
         B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     {
-        let stream = connect_stream(endpoint, tls_server_name, true, stats, rt_stats).await?;
+        let stream =
+            connect_stream(endpoint, tls_server_name, true, stats, rt_stats, locals).await?;
         let stream = TokioIo::new(stream);
         let mut builder = conn2::Builder::new(TokioExecutor::new());
 
@@ -483,7 +570,16 @@ where
             builder.http09_responses(true);
         }
     }
-    builder.build_http()
+    // Note: HttpConnector can only pin the source *IP*, not the source port,
+    // so --local-port-range/--rss-* are rejected for these clients in check_options.
+    match opts.local_addr {
+        Some(ip) => {
+            let mut connector = HttpConnector::new();
+            connector.set_local_address(Some(ip));
+            builder.build(connector)
+        }
+        None => builder.build_http(),
+    }
 }
 
 #[cfg(test)]

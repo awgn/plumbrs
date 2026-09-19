@@ -132,6 +132,11 @@ pub async fn http_reqwest(
 
 pub fn build_http_client(opts: &Options, headers: &HeaderMap) -> Result<Client> {
     let mut builder = ClientBuilder::new().default_headers(headers.clone());
+    // Note: reqwest can only pin the source *IP*, not the source port, so
+    // --local-port-range/--rss-* are rejected for this client in check_options.
+    if let Some(ip) = opts.local_addr {
+        builder = builder.local_address(ip);
+    }
     if opts.insecure {
         builder = builder
             .danger_accept_invalid_certs(true)

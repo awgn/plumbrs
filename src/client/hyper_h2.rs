@@ -49,6 +49,7 @@ pub async fn http_hyper_h2(
 
     let clock = quanta::Clock::new();
     let start = Instant::now();
+    let mut generation: u64 = 0;
     'connection: loop {
         if should_stop(total, start, &opts) {
             break 'connection;
@@ -65,8 +66,10 @@ pub async fn http_hyper_h2(
             );
         }
 
+        let locals = crate::rss::source_candidates(&opts, cid, generation);
+        generation = generation.wrapping_add(1);
         let (mut h2_client, connection) =
-            match h2_connect(endpoint, tls_name, &opts, &mut statistics, rt_stats).await {
+            match h2_connect(endpoint, tls_name, &opts, &mut statistics, rt_stats, &locals).await {
                 Some(p) => p,
                 None => {
                     total += 1;
@@ -166,8 +169,11 @@ pub async fn http_hyper_h2(
             }
 
             if is_last {
+                let locals = crate::rss::source_candidates(&opts, cid, generation);
+                generation = generation.wrapping_add(1);
                 let (client, connection) =
-                    match h2_connect(endpoint, tls_name, &opts, &mut statistics, rt_stats).await {
+                    match h2_connect(endpoint, tls_name, &opts, &mut statistics, rt_stats, &locals)
+                        .await {
                         Some(p) => p,
                         None => {
                             total += 1;
@@ -225,11 +231,12 @@ async fn h2_connect(
     opts: &Options,
     stats: &mut Statistics,
     rt_stats: &RealtimeStats,
+    locals: &[std::net::SocketAddr],
 ) -> Option<(
     h2::client::SendRequest<Bytes>,
     h2::client::Connection<MaybeTlsStream, Bytes>,
 )> {
-    let stream = connect_stream(endpoint, tls_name, true, stats, rt_stats).await?;
+    let stream = connect_stream(endpoint, tls_name, true, stats, rt_stats, locals).await?;
     match h2_builder(opts).handshake::<_, Bytes>(stream).await {
         Ok(pair) => Some(pair),
         Err(ref err) => {

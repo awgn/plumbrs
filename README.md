@@ -141,6 +141,60 @@ On Linux, the following options configure io_uring submission queues:
 - `--uring-entries <NUMBER>` (default: `4096`) — Size of the io_uring Submission Queue.
 - `--uring-sqpoll <MILLISECONDS>` — Enable kernel-side submission polling with idle timeout in milliseconds.
 
+## Source ports and RSS-aware balancing
+
+By default the kernel picks an ephemeral source port for every connection.
+On the server, Receive Side Scaling (RSS) hashes the 4-tuple
+`(src IP, dst IP, src port, dst port)` to select the RX queue (and CPU) that
+handles each connection. Sequential ephemeral ports do not hash uniformly, so
+a benchmark can overload a few server queues while others stay idle.
+
+Plumbrs can bind an explicit source port per connection, and — when the
+server RSS configuration is known — pick ports that spread evenly across the
+server RX queues:
+
+- `--local-addr <IP>` — Source IP to bind outgoing connections to.
+- `--local-port-range <START-END>` — Source port range (e.g. `40000-41000`),
+  assigned round-robin. Must hold at least as many ports as connections.
+- `--rss-key <HEX|@FILE>` — RSS Toeplitz hash key. Dump it on the server with
+  `ethtool --show-rxfh <iface>` and pass `--rss-key @rxfh.txt` (or paste the
+  hex inline).
+- `--rss-indir <N|LIST|@FILE>` — RSS indirection table: a queue count (e.g.
+  `8`), an explicit queue list (e.g. `0,1,2,3`), or a file with
+  `ethtool -x` output (`--rss-indir @rxfh.txt`; a `--show-rxfh` dump contains
+  both the key and the table, so the same file can feed both options).
+
+```bash
+# on the server, dump the RSS configuration:
+ethtool --show-rxfh eth0 > rxfh.txt
+
+# on the load generator, spread 64 connections evenly over the server queues:
+plumbrs -c 64 --rss-key @rxfh.txt --rss-indir @rxfh.txt http://server/
+
+# ...optionally restricted to a known-free port range:
+plumbrs -c 64 --local-port-range 40000-41000 \
+  --rss-key @rxfh.txt --rss-indir @rxfh.txt http://server/
+```
+
+Notes:
+
+- Source ports are supported by the direct-connect clients (`auto`, `hyper`,
+  `hyper-chunked`, `hyper-h2`, `hyper-mcp` with the `mcp` feature, and `compio`
+  with the `compio` feature). The other clients (`hyper-legacy`, `hyper-rt1`,
+  `reqwest`, `tokio-uring`, `monoio`) reject `--local-port-range`/`--rss-*`;
+  `hyper-legacy`, `hyper-rt1` and `reqwest` still honor `--local-addr`
+  (source IP only).
+- If the server closes a connection, the reconnect uses the next port in the
+  assignment, so a task sticks to its server queue while avoiding `TIME_WAIT`
+  collisions (`SO_REUSEADDR` is set on bound sockets).
+- Source-port options require persistent connections (default `--rpc`): with
+  a finite `--rpc N` they are rejected, since per-connection bind work would
+  be pure overhead and queue stickiness is impossible for single-request
+  connections.
+- Balancing is computed for the first URI (source IP from `--local-addr` or
+  auto-detected); with several URIs pointing at different hosts a warning is
+  printed.
+
 ## Examples
 
 Basic GET request with 10 concurrent connections for 30 seconds:

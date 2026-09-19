@@ -61,6 +61,10 @@ monoio = ["dep:monoio", "dep:io-uring"]
 compio = ["dep:compio"]
 mcp = ["dep:rmcp"]
 
+[[example]]
+name = "mcp_opt_bench"
+required-features = ["mcp"]
+
 [profile.release]
 codegen-units    = 1
 debug            = false

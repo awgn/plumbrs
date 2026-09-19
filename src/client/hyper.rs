@@ -60,6 +60,7 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
 
     let clock = quanta::Clock::new();
     let start = Instant::now();
+    let mut generation: u64 = 0;
 
     'connection: loop {
         if should_stop(total, start, &opts) {
@@ -78,12 +79,15 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
             );
         }
 
+        let locals = crate::rss::source_candidates(&opts, cid, generation);
+        generation = generation.wrapping_add(1);
         let (mut sender, mut conn_task) = match B::build_connection(
             endpoint,
             tls_server_name(&opts, &uri),
             &mut statistics,
             rt_stats,
             &opts,
+            &locals,
         )
         .await
         {

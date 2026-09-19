@@ -2,7 +2,7 @@ use std::{collections::HashSet, sync::Arc, time::Instant};
 
 use bytes::Bytes;
 use compio::io::{AsyncRead, AsyncWriteExt};
-use compio::net::TcpStream;
+use compio::net::{TcpSocket, TcpStream, ToSocketAddrsAsync};
 use http::{Request, StatusCode};
 use http_body_util::{BodyExt, Either, Full};
 use http_wire::{WireDecode, WireEncode, response::FullResponse};
@@ -16,6 +16,90 @@ use crate::{
     options::Options,
     stats::{RealtimeStats, Statistics},
 };
+
+/// Open a compio TCP connection, optionally binding a source address first.
+///
+/// With an empty `locals` the kernel picks the source IP and an ephemeral
+/// port (previous behavior). Otherwise each candidate is tried in order until
+/// one connects; `AddrInUse`/`AddrNotAvailable` moves on to the next
+/// candidate so a busy port does not fail the connection.
+async fn connect_compio(
+    endpoint: &str,
+    locals: &[std::net::SocketAddr],
+) -> std::io::Result<TcpStream> {
+    if locals.is_empty() {
+        let stream = TcpStream::connect(endpoint).await?;
+        stream.set_nodelay(true)?;
+        return Ok(stream);
+    }
+
+    let mut remotes: Vec<std::net::SocketAddr> =
+        endpoint.to_socket_addrs_async().await?.collect();
+    if remotes.is_empty() {
+        return Err(std::io::Error::other(format!(
+            "cannot resolve '{endpoint}'"
+        )));
+    }
+    // Prefer a remote matching the requested local family.
+    if let Some(local) = locals.first()
+        && let Some(pos) = remotes.iter().position(|r| r.is_ipv4() == local.is_ipv4())
+    {
+        remotes.swap(0, pos);
+    }
+    let remote = remotes[0];
+
+    let mut last_err = None;
+    for local in locals {
+        // A wildcard local follows the remote family (e.g. 0.0.0.0 vs [::]).
+        let mut bind = *local;
+        if bind.ip().is_unspecified() && bind.is_ipv4() != remote.is_ipv4() {
+            bind = std::net::SocketAddr::new(
+                if remote.is_ipv4() {
+                    std::net::IpAddr::from([0, 0, 0, 0])
+                } else {
+                    std::net::IpAddr::from([0u16; 8])
+                },
+                bind.port(),
+            );
+        }
+        let socket = match bind {
+            std::net::SocketAddr::V4(_) => TcpSocket::new_v4().await,
+            std::net::SocketAddr::V6(_) => TcpSocket::new_v6().await,
+        };
+        let socket = match socket {
+            Ok(s) => s,
+            Err(e) => {
+                last_err = Some(e);
+                continue;
+            }
+        };
+        // Allow quick reuse of ports stuck in TIME_WAIT (matters with --rpc).
+        let _ = socket.set_reuseaddr(true);
+        if let Err(e) = socket.bind(bind).await {
+            last_err = Some(e);
+            continue;
+        }
+        match socket.connect(remote).await {
+            Ok(stream) => {
+                stream.set_nodelay(true)?;
+                return Ok(stream);
+            }
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::AddrInUse | std::io::ErrorKind::AddrNotAvailable
+                ) =>
+            {
+                last_err = Some(e);
+                continue;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last_err.unwrap_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::AddrInUse, "no usable source port")
+    }))
+}
 
 pub async fn http_compio(
     tid: usize,
@@ -74,6 +158,7 @@ pub async fn http_compio(
 
     let clock = quanta::Clock::new();
     let start = Instant::now();
+    let mut generation: u64 = 0;
     'connection: loop {
         if should_stop(total, start, &opts) {
             break 'connection;
@@ -90,8 +175,10 @@ pub async fn http_compio(
             );
         }
 
-        // Connect to the endpoint...
-        let mut stream = match TcpStream::connect(&*endpoint).await {
+        // Connect to the endpoint, binding a source port when requested.
+        let locals = crate::rss::source_candidates(&opts, cid, generation);
+        generation = generation.wrapping_add(1);
+        let mut stream = match connect_compio(endpoint, &locals).await {
             Ok(s) => s,
             Err(ref err) => {
                 statistics.set_error(err, rt_stats);

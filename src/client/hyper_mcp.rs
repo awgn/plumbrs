@@ -131,6 +131,7 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
 
     let clock = quanta::Clock::new();
     let start = Instant::now();
+    let mut generation: u64 = 0;
     // Wrapping cursor over `mcp.tool_bodies`: avoids a division per request.
     let mut body_idx: usize = 0;
     'connection: loop {
@@ -149,12 +150,15 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
             );
         }
 
+        let locals = crate::rss::source_candidates(opts, cid, generation);
+        generation = generation.wrapping_add(1);
         let (mut sender, mut conn_task) = match B::build_connection(
             endpoint,
             tls_server_name(opts, &uri),
             &mut statistics,
             rt_stats,
             opts,
+            &locals,
         )
         .await
         {
@@ -758,11 +762,12 @@ where
     let rt_stats = RealtimeStats::default();
 
     // Step 1: SSE handshake to get the message endpoint
-    // Build connection for SSE GET request
-    let (mut sse_sender, sse_conn_task) =
-        B::build_connection::<Full<Bytes>>(endpoint, tls_name, &mut stats, &rt_stats, opts)
-            .await
-            .unwrap_or_else(|| fatal!(3, "SSE connection failed"));
+    // Build connection for SSE GET request (one-shot init: kernel source port).
+    let (mut sse_sender, sse_conn_task) = B::build_connection::<Full<Bytes>>(
+        endpoint, tls_name, &mut stats, &rt_stats, opts, &[],
+    )
+    .await
+    .unwrap_or_else(|| fatal!(3, "SSE connection failed"));
 
     // Build SSE GET request
     let sse_req_uri = request_uri(&base_uri, opts.absolute_uri || opts.http2);
@@ -814,7 +819,7 @@ where
     let post_uri = request_uri(&new_uri, opts.absolute_uri || opts.http2);
 
     let (mut post_sender, _) =
-        Http1::build_connection::<Full<Bytes>>(endpoint, tls_name, &mut stats, &rt_stats, opts)
+        Http1::build_connection::<Full<Bytes>>(endpoint, tls_name, &mut stats, &rt_stats, opts, &[])
             .await
             .unwrap_or_else(|| fatal!(3, "POST connection failed"));
 

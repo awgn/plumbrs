@@ -109,6 +109,8 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
         } else {
             connections_per_instance
         };
+        // Global connection offset for deterministic source-port assignment.
+        opts.conn_base = id * connections_per_instance + id.min(reminder);
 
         let handle = thread::spawn(move || -> Result<(Statistics, Metrics)> {
             #[cfg(all(target_os = "linux", feature = "tokio_uring"))]

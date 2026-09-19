@@ -237,6 +237,30 @@ pub struct Options {
     )]
     pub absolute_uri: bool,
 
+    #[arg(help = "Source IP address to bind outgoing connections to", long = "local-addr")]
+    pub local_addr: Option<std::net::IpAddr>,
+    #[arg(
+        help = "Source port range for outgoing connections, e.g. 40000-41000 (assigned round-robin)",
+        long = "local-port-range",
+        value_parser = crate::rss::parse_port_range
+    )]
+    pub local_port_range: Option<(u16, u16)>,
+    #[arg(
+        help = "RSS hash key (hex, from `ethtool --show-rxfh` on the server); prefix with @ to read from file",
+        long = "rss-key"
+    )]
+    pub rss_key: Option<String>,
+    #[arg(
+        help = "RSS indirection: queue count (e.g. 8), queue list (e.g. 0,1,2,3) or @file with `ethtool -x` output",
+        long = "rss-indir"
+    )]
+    pub rss_indir: Option<String>,
+    #[arg(skip)]
+    pub conn_base: usize,
+    #[arg(skip)]
+    pub total_connections: usize,
+    #[arg(skip)]
+    pub rss: Option<crate::rss::RssState>,
     #[arg(help = "HTTP/HTTPS URIs used in the request (e.g. http://192.168.0.1:80)")]
     pub uri: Vec<String>,
 }
