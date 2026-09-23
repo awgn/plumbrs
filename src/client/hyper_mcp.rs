@@ -333,8 +333,39 @@ async fn collect_json_body(
     }
 }
 
+/// Filters tools based on `opts.mcp_tool`.
+/// If `opts.mcp_tool` is empty, returns all tools (preserving existing behavior).
+/// If specified, keeps only tools matching names in `opts.mcp_tool`.
+/// Returns an error if none of the filtered tools match.
+fn filter_tools<'a>(tools: &'a [Tool], opts: &Options) -> Result<Vec<&'a Tool>, String> {
+    if opts.mcp_tool.is_empty() {
+        return Ok(tools.iter().collect());
+    }
+
+    for requested in &opts.mcp_tool {
+        if !tools.iter().any(|t| t.name.as_ref() == requested) {
+            eprintln!("MCP: warning: tool '{requested}' not found on server");
+        }
+    }
+
+    let filtered: Vec<&'a Tool> = tools
+        .iter()
+        .filter(|t| opts.mcp_tool.iter().any(|name| name == t.name.as_ref()))
+        .collect();
+
+    if filtered.is_empty() {
+        return Err(format!(
+            "no tools matching filter {:?} found on MCP server (available: {:?})",
+            opts.mcp_tool,
+            tools.iter().map(|t| t.name.as_ref()).collect::<Vec<_>>()
+        ));
+    }
+
+    Ok(filtered)
+}
+
 /// Pre-compiles a `tools/call` JSON-RPC body per tool, sharing one RNG.
-fn compile_tool_bodies(tools: &[Tool], opts: &Options) -> Vec<Bytes> {
+fn compile_tool_bodies(tools: &[&Tool], opts: &Options) -> Vec<Bytes> {
     let mut rng = rand::rng();
     tools
         .iter()
@@ -651,9 +682,22 @@ where
         tools.len(),
         tools.iter().map(|t| t.name.as_ref()).collect::<Vec<_>>()
     );
+    let selected_tools = filter_tools(tools, opts)
+        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
+
+    if !opts.mcp_tool.is_empty() {
+        eprintln!(
+            "MCP Streamable HTTP: filtered down to {} tools: {:?}",
+            selected_tools.len(),
+            selected_tools
+                .iter()
+                .map(|t| t.name.as_ref())
+                .collect::<Vec<_>>()
+        );
+    }
 
     // Step 4: Pre-compile JSON bodies for each tool's tools/call invocation
-    let tool_bodies = compile_tool_bodies(tools, opts);
+    let tool_bodies = compile_tool_bodies(&selected_tools, opts);
 
     Ok(McpSetup {
         uri: uri.clone(),
@@ -763,11 +807,10 @@ where
 
     // Step 1: SSE handshake to get the message endpoint
     // Build connection for SSE GET request (one-shot init: kernel source port).
-    let (mut sse_sender, sse_conn_task) = B::build_connection::<Full<Bytes>>(
-        endpoint, tls_name, &mut stats, &rt_stats, opts, &[],
-    )
-    .await
-    .unwrap_or_else(|| fatal!(3, "SSE connection failed"));
+    let (mut sse_sender, sse_conn_task) =
+        B::build_connection::<Full<Bytes>>(endpoint, tls_name, &mut stats, &rt_stats, opts, &[])
+            .await
+            .unwrap_or_else(|| fatal!(3, "SSE connection failed"));
 
     // Build SSE GET request
     let sse_req_uri = request_uri(&base_uri, opts.absolute_uri || opts.http2);
@@ -818,10 +861,16 @@ where
     };
     let post_uri = request_uri(&new_uri, opts.absolute_uri || opts.http2);
 
-    let (mut post_sender, _) =
-        Http1::build_connection::<Full<Bytes>>(endpoint, tls_name, &mut stats, &rt_stats, opts, &[])
-            .await
-            .unwrap_or_else(|| fatal!(3, "POST connection failed"));
+    let (mut post_sender, _) = Http1::build_connection::<Full<Bytes>>(
+        endpoint,
+        tls_name,
+        &mut stats,
+        &rt_stats,
+        opts,
+        &[],
+    )
+    .await
+    .unwrap_or_else(|| fatal!(3, "POST connection failed"));
 
     // POST a JSON-RPC message and drain its (usually empty) response body so
     // the connection is reusable for the next message.
@@ -968,9 +1017,21 @@ where
         tools.len(),
         tools.iter().map(|t| t.name.as_ref()).collect::<Vec<_>>()
     );
+    let selected_tools = filter_tools(tools, opts).unwrap_or_else(|e| fatal!(3, "{e}"));
+
+    if !opts.mcp_tool.is_empty() {
+        eprintln!(
+            "MCP: filtered down to {} tools: {:?}",
+            selected_tools.len(),
+            selected_tools
+                .iter()
+                .map(|t| t.name.as_ref())
+                .collect::<Vec<_>>()
+        );
+    }
 
     // Step 5: Pre-compile JSON bodies for each tool's tools/call invocation
-    let tool_bodies = compile_tool_bodies(tools, opts);
+    let tool_bodies = compile_tool_bodies(&selected_tools, opts);
 
     // Spawn task to keep SSE connection alive
     let sse_task = tokio::spawn(async move {
@@ -989,5 +1050,92 @@ where
         tool_bodies,
         sse_task: Some(sse_task),
         session_id: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn test_filter_tools_empty_filter() {
+        let opts = Options::parse_from(["plumbrs", "http://localhost"]);
+        assert!(opts.mcp_tool.is_empty());
+
+        let t1 = Tool::new("tool1", "desc1", rmcp::serde_json::Map::new());
+        let t2 = Tool::new("tool2", "desc2", rmcp::serde_json::Map::new());
+        let tools = vec![t1, t2];
+
+        let filtered = filter_tools(&tools, &opts).unwrap();
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0].name.as_ref(), "tool1");
+        assert_eq!(filtered[1].name.as_ref(), "tool2");
+    }
+
+    #[test]
+    fn test_filter_tools_with_selection() {
+        let opts = Options::parse_from(["plumbrs", "--mcp-tool", "tool2", "http://localhost"]);
+        assert_eq!(opts.mcp_tool, vec!["tool2"]);
+
+        let t1 = Tool::new("tool1", "desc1", rmcp::serde_json::Map::new());
+        let t2 = Tool::new("tool2", "desc2", rmcp::serde_json::Map::new());
+        let t3 = Tool::new("tool3", "desc3", rmcp::serde_json::Map::new());
+        let tools = vec![t1, t2, t3];
+
+        let filtered = filter_tools(&tools, &opts).unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name.as_ref(), "tool2");
+    }
+
+    #[test]
+    fn test_filter_tools_comma_separated() {
+        let opts =
+            Options::parse_from(["plumbrs", "--mcp-tool", "tool1,tool3", "http://localhost"]);
+        assert_eq!(opts.mcp_tool, vec!["tool1", "tool3"]);
+
+        let t1 = Tool::new("tool1", "desc1", rmcp::serde_json::Map::new());
+        let t2 = Tool::new("tool2", "desc2", rmcp::serde_json::Map::new());
+        let t3 = Tool::new("tool3", "desc3", rmcp::serde_json::Map::new());
+        let tools = vec![t1, t2, t3];
+
+        let filtered = filter_tools(&tools, &opts).unwrap();
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0].name.as_ref(), "tool1");
+        assert_eq!(filtered[1].name.as_ref(), "tool3");
+    }
+
+    #[test]
+    fn test_filter_tools_alias_and_multiple_args() {
+        let opts = Options::parse_from([
+            "plumbrs",
+            "--mcp-tools",
+            "tool1",
+            "--mcp-tool",
+            "tool2",
+            "http://localhost",
+        ]);
+        assert_eq!(opts.mcp_tool, vec!["tool1", "tool2"]);
+
+        let t1 = Tool::new("tool1", "desc1", rmcp::serde_json::Map::new());
+        let t2 = Tool::new("tool2", "desc2", rmcp::serde_json::Map::new());
+        let t3 = Tool::new("tool3", "desc3", rmcp::serde_json::Map::new());
+        let tools = vec![t1, t2, t3];
+
+        let filtered = filter_tools(&tools, &opts).unwrap();
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0].name.as_ref(), "tool1");
+        assert_eq!(filtered[1].name.as_ref(), "tool2");
+    }
+
+    #[test]
+    fn test_filter_tools_no_match() {
+        let opts = Options::parse_from(["plumbrs", "--mcp-tool", "unknown", "http://localhost"]);
+
+        let t1 = Tool::new("tool1", "desc1", rmcp::serde_json::Map::new());
+        let tools = vec![t1];
+
+        let err = filter_tools(&tools, &opts);
+        assert!(err.is_err());
     }
 }

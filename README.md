@@ -88,6 +88,8 @@ Two transport modes are supported:
 
 - `--mcp-rand-string-len <NUMBER>` — Fix the length of random strings generated for `tools/call` arguments. If omitted, a random length between 5 and 20 is used each time.
 
+- `--mcp-tool <NAME>` (alias: `--mcp-tools`) — Filter MCP tools to invoke by name; can be repeated or comma-separated (e.g. `--mcp-tool tool1,tool2`). If not specified or empty, all tools returned by the server are invoked round-robin. Passing this option implies `--mcp`.
+
 Both options are only available with `auto` or `hyper-mcp` client types.
 
 **Example — Benchmark an MCP server with Streamable HTTP:**

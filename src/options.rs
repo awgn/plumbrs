@@ -203,6 +203,15 @@ pub struct Options {
     )]
     pub mcp_rand_string_len: Option<usize>,
 
+    #[cfg(feature = "mcp")]
+    #[arg(
+        help = "Filter MCP tools to invoke by name; can be repeated or comma-separated (implies --mcp). If empty, all tools are invoked.",
+        long = "mcp-tool",
+        visible_alias = "mcp-tools",
+        value_delimiter = ','
+    )]
+    pub mcp_tool: Vec<String>,
+
     #[cfg(all(
         target_os = "linux",
         any(feature = "tokio_uring", feature = "monoio", feature = "compio")
@@ -237,7 +246,10 @@ pub struct Options {
     )]
     pub absolute_uri: bool,
 
-    #[arg(help = "Source IP address to bind outgoing connections to", long = "local-addr")]
+    #[arg(
+        help = "Source IP address to bind outgoing connections to",
+        long = "local-addr"
+    )]
     pub local_addr: Option<std::net::IpAddr>,
     #[arg(
         help = "Source port range for outgoing connections, e.g. 40000-41000 (assigned round-robin)",

@@ -48,7 +48,10 @@ fn main() {
 
     // ---- B: per-request headers (5 headers, like the MCP hot loop) ----
     let mut headers = HeaderMap::new();
-    headers.insert(header::HOST, header::HeaderValue::from_static("localhost:8080"));
+    headers.insert(
+        header::HOST,
+        header::HeaderValue::from_static("localhost:8080"),
+    );
     headers.insert(
         header::CONTENT_TYPE,
         header::HeaderValue::from_static("application/json"),
@@ -61,13 +64,22 @@ fn main() {
         header::HeaderName::from_static("mcp-session-id"),
         header::HeaderValue::from_static("abc123"),
     );
-    headers.insert(header::USER_AGENT, header::HeaderValue::from_static("plumbrs"));
+    headers.insert(
+        header::USER_AGENT,
+        header::HeaderValue::from_static("plumbrs"),
+    );
     let mut headers_close = headers.clone();
-    headers_close.insert(header::CONNECTION, header::HeaderValue::from_static("close"));
+    headers_close.insert(
+        header::CONNECTION,
+        header::HeaderValue::from_static("close"),
+    );
 
     bench("B OLD headers: clone + insert(close)", 1_000_000, || {
         let mut h = headers.clone();
-        h.insert(header::CONNECTION, header::HeaderValue::from_static("close"));
+        h.insert(
+            header::CONNECTION,
+            header::HeaderValue::from_static("close"),
+        );
         black_box(h);
     });
     bench("B OLD headers: clone only (common path)", 1_000_000, || {
@@ -80,7 +92,9 @@ fn main() {
     // ---- C: SSE line processing, 100 data lines ----
     let mut src = String::new();
     for i in 0..100 {
-        src.push_str(&format!("data: {{\"jsonrpc\":\"2.0\",\"id\":{i},\"result\":{{}}}}\n"));
+        src.push_str(&format!(
+            "data: {{\"jsonrpc\":\"2.0\",\"id\":{i},\"result\":{{}}}}\n"
+        ));
         if i % 10 == 9 {
             src.push('\n');
         }

@@ -132,7 +132,15 @@ fn local_port_range_is_honored() {
 
     let status = run_plumbrs(
         &[
-            "-t", "2", "-c", "4", "-r", "2", "-C", "hyper", "--local-port-range",
+            "-t",
+            "2",
+            "-c",
+            "4",
+            "-r",
+            "2",
+            "-C",
+            "hyper",
+            "--local-port-range",
             "41200-41299",
         ],
         port,
@@ -140,11 +148,19 @@ fn local_port_range_is_honored() {
     assert!(status.success(), "plumbrs exited with {status}");
 
     let ports = wait_for(&seen, 4);
-    assert_eq!(ports.len(), 4, "expected one connection per task, saw {ports:?}");
+    assert_eq!(
+        ports.len(),
+        4,
+        "expected one connection per task, saw {ports:?}"
+    );
     let mut sorted = ports.clone();
     sorted.sort_unstable();
     sorted.dedup();
-    assert_eq!(sorted.len(), 4, "source ports must be distinct, saw {ports:?}");
+    assert_eq!(
+        sorted.len(),
+        4,
+        "source ports must be distinct, saw {ports:?}"
+    );
     for p in &sorted {
         assert!(
             (41200..=41299).contains(p),
@@ -159,7 +175,18 @@ fn local_port_range_assigns_deterministically() {
     let port = spawn_endpoint(Arc::clone(&seen));
 
     let status = run_plumbrs(
-        &["-t", "1", "-c", "2", "-r", "1", "-C", "hyper", "--local-port-range", "42100-42101"],
+        &[
+            "-t",
+            "1",
+            "-c",
+            "2",
+            "-r",
+            "1",
+            "-C",
+            "hyper",
+            "--local-port-range",
+            "42100-42101",
+        ],
         port,
     );
     assert!(status.success(), "plumbrs exited with {status}");
@@ -230,7 +257,15 @@ fn compio_local_port_range_is_honored() {
 
     let status = run_plumbrs(
         &[
-            "-t", "1", "-c", "4", "-r", "2", "-C", "compio", "--local-port-range",
+            "-t",
+            "1",
+            "-c",
+            "4",
+            "-r",
+            "2",
+            "-C",
+            "compio",
+            "--local-port-range",
             "41400-41499",
         ],
         port,
@@ -238,11 +273,19 @@ fn compio_local_port_range_is_honored() {
     assert!(status.success(), "plumbrs exited with {status}");
 
     let ports = wait_for(&seen, 4);
-    assert_eq!(ports.len(), 4, "expected one connection per task, saw {ports:?}");
+    assert_eq!(
+        ports.len(),
+        4,
+        "expected one connection per task, saw {ports:?}"
+    );
     let mut sorted = ports.clone();
     sorted.sort_unstable();
     sorted.dedup();
-    assert_eq!(sorted.len(), 4, "source ports must be distinct, saw {ports:?}");
+    assert_eq!(
+        sorted.len(),
+        4,
+        "source ports must be distinct, saw {ports:?}"
+    );
     for p in &sorted {
         assert!(
             (41400..=41499).contains(p),
@@ -258,7 +301,15 @@ fn source_port_rejected_with_finite_rpc() {
 
     let status = run_plumbrs(
         &[
-            "-c", "1", "-r", "1", "--rpc", "1", "-C", "hyper", "--local-port-range",
+            "-c",
+            "1",
+            "-r",
+            "1",
+            "--rpc",
+            "1",
+            "-C",
+            "hyper",
+            "--local-port-range",
             "42200-42299",
         ],
         port,
@@ -275,7 +326,16 @@ fn source_port_rejected_for_reqwest() {
     let port = spawn_endpoint(Arc::clone(&seen));
 
     let status = run_plumbrs(
-        &["-c", "1", "-r", "1", "-C", "reqwest", "--local-port-range", "42200-42299"],
+        &[
+            "-c",
+            "1",
+            "-r",
+            "1",
+            "-C",
+            "reqwest",
+            "--local-port-range",
+            "42200-42299",
+        ],
         port,
     );
     assert!(

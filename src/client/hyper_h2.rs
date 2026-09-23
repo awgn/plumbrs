@@ -68,14 +68,22 @@ pub async fn http_hyper_h2(
 
         let locals = crate::rss::source_candidates(&opts, cid, generation);
         generation = generation.wrapping_add(1);
-        let (mut h2_client, connection) =
-            match h2_connect(endpoint, tls_name, &opts, &mut statistics, rt_stats, &locals).await {
-                Some(p) => p,
-                None => {
-                    total += 1;
-                    continue 'connection;
-                }
-            };
+        let (mut h2_client, connection) = match h2_connect(
+            endpoint,
+            tls_name,
+            &opts,
+            &mut statistics,
+            rt_stats,
+            &locals,
+        )
+        .await
+        {
+            Some(p) => p,
+            None => {
+                total += 1;
+                continue 'connection;
+            }
+        };
 
         tokio::task::spawn(async move {
             if let Err(err) = connection.await {
@@ -171,15 +179,22 @@ pub async fn http_hyper_h2(
             if is_last {
                 let locals = crate::rss::source_candidates(&opts, cid, generation);
                 generation = generation.wrapping_add(1);
-                let (client, connection) =
-                    match h2_connect(endpoint, tls_name, &opts, &mut statistics, rt_stats, &locals)
-                        .await {
-                        Some(p) => p,
-                        None => {
-                            total += 1;
-                            continue 'connection;
-                        }
-                    };
+                let (client, connection) = match h2_connect(
+                    endpoint,
+                    tls_name,
+                    &opts,
+                    &mut statistics,
+                    rt_stats,
+                    &locals,
+                )
+                .await
+                {
+                    Some(p) => p,
+                    None => {
+                        total += 1;
+                        continue 'connection;
+                    }
+                };
                 h2_client = client;
 
                 tokio::task::spawn(async move {

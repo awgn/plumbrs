@@ -677,7 +677,7 @@ async fn spawn_tasks(
                 } else {
                     #[cfg(feature = "mcp")]
                     {
-                        if opts.mcp || opts.mcp_sse {
+                        if opts.mcp || opts.mcp_sse || !opts.mcp_tool.is_empty() {
                             tasks.spawn(
                                 async move { http_hyper_mcp(id, con, opts, &stats[id]).await },
                             );

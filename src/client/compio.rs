@@ -33,8 +33,7 @@ async fn connect_compio(
         return Ok(stream);
     }
 
-    let mut remotes: Vec<std::net::SocketAddr> =
-        endpoint.to_socket_addrs_async().await?.collect();
+    let mut remotes: Vec<std::net::SocketAddr> = endpoint.to_socket_addrs_async().await?.collect();
     if remotes.is_empty() {
         return Err(std::io::Error::other(format!(
             "cannot resolve '{endpoint}'"

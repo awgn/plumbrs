@@ -85,10 +85,7 @@ pub fn parse_hex_key(s: &str) -> std::result::Result<Vec<u8>, String> {
             return Err(format!("invalid character '{c}' in RSS key"));
         }
     }
-    let hex: String = s
-        .chars()
-        .filter(|c| c.is_ascii_hexdigit())
-        .collect();
+    let hex: String = s.chars().filter(|c| c.is_ascii_hexdigit()).collect();
     if hex.len() < 8 {
         return Err("RSS key is too short (need at least 4 bytes of hex)".to_string());
     }
@@ -117,10 +114,7 @@ pub fn parse_indir_inline(s: &str) -> std::result::Result<Vec<u32>, String> {
     }
     let queues: Vec<u32> = items
         .iter()
-        .map(|t| {
-            t.parse()
-                .map_err(|_| format!("invalid queue id: '{t}'"))
-        })
+        .map(|t| t.parse().map_err(|_| format!("invalid queue id: '{t}'")))
         .collect::<std::result::Result<_, _>>()?;
     if items.len() == 1 {
         // A single number is the queue count: synthesize a uniform table.
@@ -128,9 +122,7 @@ pub fn parse_indir_inline(s: &str) -> std::result::Result<Vec<u32>, String> {
         if n == 0 {
             return Err("RSS queue count must be > 0".to_string());
         }
-        return Ok((0..SYNTHETIC_INDIR_LEN)
-            .map(|i| i as u32 % n)
-            .collect());
+        return Ok((0..SYNTHETIC_INDIR_LEN).map(|i| i as u32 % n).collect());
     }
     if !items.len().is_power_of_two() {
         // If an explicit list is not a power of two (e.g. `0,1,2,3,4,5`),
@@ -228,8 +220,7 @@ fn resolve_key(spec: &str) -> Result<Vec<u8>> {
         if let Some(key) = extract_ethtool_key(&content) {
             return Ok(key);
         }
-        return parse_hex_key(&content)
-            .map_err(|e| anyhow!("cannot parse RSS key from file: {e}"));
+        return parse_hex_key(&content).map_err(|e| anyhow!("cannot parse RSS key from file: {e}"));
     }
     parse_hex_key(spec).map_err(|e| anyhow!("invalid --rss-key: {e}"))
 }
@@ -289,7 +280,13 @@ pub fn toeplitz_hash(key: &[u8], input: &[u8]) -> u32 {
 }
 
 /// Write 4-tuple input bytes to stack buffer; returns the written length (0 on mismatched families).
-fn write_rss_input(src: &IpAddr, dst: &IpAddr, sport: u16, dport: u16, buf: &mut [u8; 36]) -> usize {
+fn write_rss_input(
+    src: &IpAddr,
+    dst: &IpAddr,
+    sport: u16,
+    dport: u16,
+    buf: &mut [u8; 36],
+) -> usize {
     match (src, dst) {
         (IpAddr::V4(s), IpAddr::V4(d)) => {
             buf[0..4].copy_from_slice(&s.octets());
@@ -352,8 +349,12 @@ pub fn build_balanced_ports(
     // Fixed baseline input with sport = 0, and the bit offset where sport starts.
     let mut fixed_buf = [0u8; 36];
     let (fixed_len, sport_bit_offset) = match (&src, &dst) {
-        (IpAddr::V4(_), IpAddr::V4(_)) => (write_rss_input(&src, &dst, 0, dport, &mut fixed_buf), 64),
-        (IpAddr::V6(_), IpAddr::V6(_)) => (write_rss_input(&src, &dst, 0, dport, &mut fixed_buf), 256),
+        (IpAddr::V4(_), IpAddr::V4(_)) => {
+            (write_rss_input(&src, &dst, 0, dport, &mut fixed_buf), 64)
+        }
+        (IpAddr::V6(_), IpAddr::V6(_)) => {
+            (write_rss_input(&src, &dst, 0, dport, &mut fixed_buf), 256)
+        }
         _ => return (Vec::new(), Vec::new()),
     };
     if fixed_len == 0 {
@@ -418,10 +419,9 @@ pub fn distinct_queues(indir: &[u32]) -> usize {
 
 fn supports_source_ports(client: ClientType) -> bool {
     match client {
-        ClientType::Auto
-        | ClientType::Hyper
-        | ClientType::HyperChunked
-        | ClientType::HyperH2 => true,
+        ClientType::Auto | ClientType::Hyper | ClientType::HyperChunked | ClientType::HyperH2 => {
+            true
+        }
         #[cfg(feature = "mcp")]
         ClientType::HyperMcp => true,
         #[cfg(feature = "compio")]
@@ -466,11 +466,7 @@ fn resolve_host(host: &str, port: u16, prefer: Option<IpAddr>) -> Result<IpAddr>
 
 /// Discover the local IP the kernel would use towards `dst` (no traffic sent).
 fn detect_src_ip(dst: SocketAddr) -> Result<IpAddr> {
-    let bind = if dst.is_ipv4() {
-        "0.0.0.0:0"
-    } else {
-        "[::]:0"
-    };
+    let bind = if dst.is_ipv4() { "0.0.0.0:0" } else { "[::]:0" };
     let sock =
         std::net::UdpSocket::bind(bind).map_err(|e| anyhow!("cannot detect source IP: {e}"))?;
     sock.connect(dst)
@@ -485,9 +481,8 @@ fn detect_src_ip(dst: SocketAddr) -> Result<IpAddr> {
 /// Called once at startup from `check_options`; per-connection assignment is
 /// done later with [`source_candidates`].
 pub fn init_source_ports(opts: &mut Options) -> Result<()> {
-    let manual = opts.local_port_range.is_some()
-        || opts.rss_key.is_some()
-        || opts.rss_indir.is_some();
+    let manual =
+        opts.local_port_range.is_some() || opts.rss_key.is_some() || opts.rss_indir.is_some();
 
     if !manual && opts.local_addr.is_none() {
         return Ok(());
@@ -508,7 +503,10 @@ pub fn init_source_ports(opts: &mut Options) -> Result<()> {
 
     // Raw-socket clients cannot bind a source port.
     if manual && !supports_source_ports(opts.client_type) {
-        bail!("--local-port-range/--rss-* need a direct-connect client (hyper, hyper-chunked, hyper-h2, compio); not supported with '{}'", opts.client_type);
+        bail!(
+            "--local-port-range/--rss-* need a direct-connect client (hyper, hyper-chunked, hyper-h2, compio); not supported with '{}'",
+            opts.client_type
+        );
     }
     if opts.local_addr.is_some() && is_raw_socket_client(opts.client_type) {
         bail!(
@@ -537,15 +535,12 @@ pub fn init_source_ports(opts: &mut Options) -> Result<()> {
         return Ok(());
     }
 
-    let key_spec = opts
-        .rss_key
-        .as_deref()
-        .ok_or_else(|| {
-            anyhow!(
-                "--rss-indir needs --rss-key (dump it on the server with \
+    let key_spec = opts.rss_key.as_deref().ok_or_else(|| {
+        anyhow!(
+            "--rss-indir needs --rss-key (dump it on the server with \
                  `ethtool --show-rxfh <iface>`, then pass --rss-key @file)"
-            )
-        })?;
+        )
+    })?;
     let indir_spec = opts.rss_indir.as_deref().ok_or_else(|| {
         anyhow!("--rss-key needs --rss-indir (queue count, queue list, or @file with `ethtool -x` output)")
     })?;
@@ -566,9 +561,7 @@ pub fn init_source_ports(opts: &mut Options) -> Result<()> {
     // Destination is taken from the first URI (per-task URIs share it in the
     // common case); warn when URIs point at different hosts.
     let first_uri = opts.uri.first().ok_or_else(|| anyhow!("missing URI"))?;
-    let parsed: http::Uri = first_uri
-        .parse()
-        .map_err(|e| anyhow!("invalid uri: {e}"))?;
+    let parsed: http::Uri = first_uri.parse().map_err(|e| anyhow!("invalid uri: {e}"))?;
     let host = parsed
         .host()
         .ok_or_else(|| anyhow!("no host in uri"))?
@@ -615,9 +608,8 @@ pub fn init_source_ports(opts: &mut Options) -> Result<()> {
 
     let src_ip = match opts.local_addr {
         Some(ip) => ip,
-        None => detect_src_ip(dst).map_err(|e| {
-            anyhow!("{e} (specify the source IP explicitly with --local-addr)")
-        })?,
+        None => detect_src_ip(dst)
+            .map_err(|e| anyhow!("{e} (specify the source IP explicitly with --local-addr)"))?,
     };
     if std::mem::discriminant(&src_ip) != std::mem::discriminant(&dst_ip) {
         bail!(
@@ -640,7 +632,10 @@ pub fn init_source_ports(opts: &mut Options) -> Result<()> {
 
     let (ports, _) = build_balanced_ports(&key, &indir, src_ip, dst_ip, dport, candidates);
     if ports.len() < opts.connections {
-        bail!("only {} usable source ports found; widen --local-port-range", ports.len());
+        bail!(
+            "only {} usable source ports found; widen --local-port-range",
+            ports.len()
+        );
     }
 
     let nq = distinct_queues(&indir);
@@ -735,14 +730,21 @@ RSS hash function:\n\
         // Vectors from an independent Python implementation of the RSS spec.
         let key = parse_hex_key("39:0c:8c:7d:72:47:34:2c:d8:10:0f:2f:6f:77:0d:65:d6:70:e5:8e:03:51:d8:ae:8e:4f:6e:ac:34:2f:c2:31:b7:b0:87:16:eb:3f:c1:28").unwrap();
         let cases: &[(&[u8], u32)] = &[
-            (&[192, 168, 0, 1, 10, 0, 0, 1, 0x9c, 0x40, 0, 80], 0x43d07682),
-            (&[10, 1, 2, 3, 172, 16, 0, 9, 0x12, 0x34, 0x1f, 0x90], 0x43e6b796),
+            (
+                &[192, 168, 0, 1, 10, 0, 0, 1, 0x9c, 0x40, 0, 80],
+                0x43d07682,
+            ),
+            (
+                &[10, 1, 2, 3, 172, 16, 0, 9, 0x12, 0x34, 0x1f, 0x90],
+                0x43e6b796,
+            ),
         ];
         for (input, expected) in cases {
             assert_eq!(toeplitz_hash(&key, input), *expected);
         }
         // IPv6-sized input exercises key wrapping past bit 320.
-        let v6: Vec<u8> = (0..32).collect::<Vec<u8>>()
+        let v6: Vec<u8> = (0..32)
+            .collect::<Vec<u8>>()
             .into_iter()
             .chain([0xab, 0xcd, 0x00, 0xbb])
             .collect();
@@ -754,8 +756,10 @@ RSS hash function:\n\
         let key: Vec<u8> = (0..40).map(|i| (i * 7 + 1) as u8).collect();
         // Only the very first input bit set -> hash = first 32 key bits.
         let hash = toeplitz_hash(&key, &[0x80, 0, 0, 0]);
-        let expected =
-            ((key[0] as u32) << 24) | ((key[1] as u32) << 16) | ((key[2] as u32) << 8) | key[3] as u32;
+        let expected = ((key[0] as u32) << 24)
+            | ((key[1] as u32) << 16)
+            | ((key[2] as u32) << 8)
+            | key[3] as u32;
         assert_eq!(hash, expected);
         // Only the second input bit set -> key window shifted by one.
         let hash = toeplitz_hash(&key, &[0x40, 0, 0, 0]);
@@ -815,8 +819,7 @@ RSS hash function:\n\
         let indir = extract_ethtool_indir(SAMPLE_RXFH).unwrap();
         let src: IpAddr = "192.168.0.10".parse().unwrap();
         let dst: IpAddr = "192.168.0.1".parse().unwrap();
-        let (ports, queues) =
-            build_balanced_ports(&key, &indir, src, dst, 80, 40000..41000);
+        let (ports, queues) = build_balanced_ports(&key, &indir, src, dst, 80, 40000..41000);
         assert_eq!(ports.len(), 1000);
         // First 4 ports cover all 4 queues exactly once.
         let mut first: Vec<u32> = queues[..4].to_vec();
@@ -828,7 +831,10 @@ RSS hash function:\n\
         for q in &queues {
             counts[*q as usize] += 1;
         }
-        assert!(counts.iter().all(|&c| (200..=300).contains(&c)), "{counts:?}");
+        assert!(
+            counts.iter().all(|&c| (200..=300).contains(&c)),
+            "{counts:?}"
+        );
         // Every port really hashes to its assigned queue.
         for (p, q) in ports.iter().zip(queues.iter()).take(64) {
             assert_eq!(rss_queue(&key, &indir, &src, &dst, *p, 80), Some(*q));
@@ -898,7 +904,10 @@ RSS hash function:\n\
         for generation_idx in 1..=3 {
             let c0_reconnect = source_candidates(&opts, 0, generation_idx);
             let q_recon = rss_queue(&key, &indir, &src, &dst, c0_reconnect[0].port(), 80).unwrap();
-            assert_eq!(q_recon, q0, "reconnect at gen {generation_idx} shifted queue from {q0} to {q_recon}");
+            assert_eq!(
+                q_recon, q0,
+                "reconnect at gen {generation_idx} shifted queue from {q0} to {q_recon}"
+            );
             // And must not collide with initial port
             assert_ne!(c0_reconnect[0].port(), c0_gen0[0].port());
         }

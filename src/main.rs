@@ -78,7 +78,7 @@ fn check_options(opts: &mut Options) -> Result<()> {
     #[cfg(feature = "mcp")]
     if !matches!(opts.client_type, ClientType::Auto)
         && !matches!(opts.client_type, ClientType::HyperMcp)
-        && (opts.mcp || opts.mcp_sse)
+        && (opts.mcp || opts.mcp_sse || !opts.mcp_tool.is_empty())
     {
         return Err(anyhow!("MCP not supported with this client!"));
     }
