@@ -67,6 +67,8 @@ Plumbrs is a high-performance HTTP/HTTP2 request generator designed for benchmar
 
 - `-T, --trailer <KEY:VALUE>` — Add HTTP trailer (repeatable). Only supported with `hyper-chunked` or `hyper-h2` clients.
 
+- `--cookies <PATH>` — Load HTTP cookies from a Netscape/curl cookie file (e.g. `cookies.txt`). Sets the `Cookie` header matching the target domain, path, and security scheme.
+
 - `-b, --body <BODY>` — Request body content. Can be specified multiple times for multi-chunk encoding, but multi-chunk is only supported with `hyper-chunked` client. Use `@path` to read the body from a file (streamed).
 
 - `--http2` — Use HTTP/2 only. Not available with `tokio-uring`, `monoio`, or `compio` clients.

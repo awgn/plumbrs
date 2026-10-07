@@ -10,7 +10,7 @@ use hyper::client::conn::http2 as conn2;
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use std::{str::FromStr, time::Instant};
+use std::{path::Path, str::FromStr, time::Instant};
 use tokio::net::TcpStream;
 
 use crate::client::tls::{self, MaybeTlsStream};
@@ -33,6 +33,178 @@ macro_rules! fatal {
 #[inline]
 pub fn should_stop(total: u32, start: Instant, opts: &Options) -> bool {
     opts.requests.is_some_and(|m| total >= m) || opts.duration.is_some_and(|d| start.elapsed() > d)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cookie {
+    pub domain: String,
+    pub include_subdomains: bool,
+    pub path: String,
+    pub secure: bool,
+    pub expires: i64,
+    pub name: String,
+    pub value: String,
+    pub http_only: bool,
+}
+
+pub fn parse_cookie_str(content: &str) -> Vec<Cookie> {
+    let mut cookies = Vec::new();
+
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        let (http_only, line_data) = if line.to_ascii_lowercase().starts_with("#httponly_") {
+            (true, &line[10..])
+        } else if line.starts_with('#') {
+            continue;
+        } else {
+            (false, line)
+        };
+
+        let parts: Vec<&str> = if line_data.contains('\t') {
+            line_data.split('\t').collect()
+        } else {
+            line_data.split_whitespace().collect()
+        };
+
+        if parts.len() < 6 {
+            continue;
+        }
+
+        let domain = parts[0].trim();
+        let include_subdomains = parts[1].trim().eq_ignore_ascii_case("TRUE");
+        let path = parts[2].trim();
+        let secure = parts[3].trim().eq_ignore_ascii_case("TRUE");
+        let expires = parts[4].trim().parse::<i64>().unwrap_or(0);
+        let name = parts[5].trim();
+        let value = if parts.len() >= 7 {
+            parts[6].trim()
+        } else {
+            ""
+        };
+
+        if name.is_empty() || domain.is_empty() {
+            continue;
+        }
+
+        cookies.push(Cookie {
+            domain: domain.to_string(),
+            include_subdomains,
+            path: if path.is_empty() {
+                "/".to_string()
+            } else {
+                path.to_string()
+            },
+            secure,
+            expires,
+            name: name.to_string(),
+            value: value.to_string(),
+            http_only,
+        });
+    }
+
+    cookies
+}
+
+pub fn parse_cookie_file(path: impl AsRef<Path>) -> std::io::Result<Vec<Cookie>> {
+    let content = std::fs::read_to_string(path)?;
+    Ok(parse_cookie_str(&content))
+}
+
+pub fn path_matches(cookie_path: &str, req_path: &str) -> bool {
+    if cookie_path == req_path {
+        return true;
+    }
+    if let Some(stripped) = req_path.strip_prefix(cookie_path)
+        && (cookie_path.ends_with('/') || stripped.starts_with('/'))
+    {
+        return true;
+    }
+    false
+}
+
+pub fn match_cookies<'a>(
+    cookies: &'a [Cookie],
+    uri: &http::Uri,
+    host_override: Option<&str>,
+) -> Vec<&'a Cookie> {
+    let host = host_override.or_else(|| uri.host());
+    let Some(host) = host else {
+        return Vec::new();
+    };
+
+    let req_host = if let Some(stripped) = host.strip_prefix('[') {
+        if let Some(end) = stripped.find(']') {
+            &stripped[..end]
+        } else {
+            host
+        }
+    } else if let Some((h, _)) = host.split_once(':') {
+        h
+    } else {
+        host
+    };
+    let req_host_lower = req_host.to_ascii_lowercase();
+
+    let is_secure = uri
+        .scheme_str()
+        .map(|s| s.eq_ignore_ascii_case("https"))
+        .unwrap_or(false);
+
+    let req_path = uri.path();
+    let req_path = if req_path.is_empty() { "/" } else { req_path };
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+
+    let mut matching: Vec<&'a Cookie> = cookies
+        .iter()
+        .filter(|cookie| {
+            if cookie.expires > 0 && cookie.expires < now {
+                return false;
+            }
+
+            if cookie.secure && !is_secure {
+                return false;
+            }
+
+            let cookie_path = if cookie.path.is_empty() {
+                "/"
+            } else {
+                &cookie.path
+            };
+            if !path_matches(cookie_path, req_path) {
+                return false;
+            }
+
+            let cookie_domain = cookie.domain.to_ascii_lowercase();
+            let clean_cookie_domain = cookie_domain.strip_prefix('.').unwrap_or(&cookie_domain);
+
+            if req_host_lower == clean_cookie_domain {
+                return true;
+            }
+
+            if cookie.include_subdomains {
+                let is_subdomain = req_host_lower.len() > clean_cookie_domain.len()
+                    && req_host_lower.ends_with(clean_cookie_domain)
+                    && req_host_lower.as_bytes()[req_host_lower.len() - clean_cookie_domain.len() - 1] == b'.';
+                if is_subdomain {
+                    return true;
+                }
+            }
+
+            false
+        })
+        .collect();
+
+    matching.sort_by_key(|a| std::cmp::Reverse(a.path.len()));
+
+    matching
 }
 
 pub fn build_headers(
@@ -58,6 +230,30 @@ pub fn build_headers(
                 .unwrap_or_else(|e| fatal!(2, "invalid header name: {e}")),
             HeaderValue::from_str(v).unwrap_or_else(|e| fatal!(2, "invalid header value: {e}")),
         );
+    }
+
+    if let Some(ref cookie_path) = opts.cookies {
+        let cookies = parse_cookie_file(cookie_path).unwrap_or_else(|e| {
+            fatal!(2, "could not read cookie file '{}': {e}", cookie_path.display())
+        });
+        let matching = match_cookies(&cookies, uri, opts.host.as_deref());
+        if !matching.is_empty() {
+            let cookie_str = matching
+                .iter()
+                .map(|c| format!("{}={}", c.name, c.value))
+                .collect::<Vec<_>>()
+                .join("; ");
+            if let Some(existing) = headers.get(header::COOKIE) {
+                if let Ok(existing_str) = existing.to_str() {
+                    let combined = format!("{existing_str}; {cookie_str}");
+                    headers.insert(header::COOKIE, HeaderValue::from_str(&combined)?);
+                } else {
+                    headers.append(header::COOKIE, HeaderValue::from_str(&cookie_str)?);
+                }
+            } else {
+                headers.insert(header::COOKIE, HeaderValue::from_str(&cookie_str)?);
+            }
+        }
     }
 
     if !opts.http2 && !headers.contains_key(header::HOST) {
@@ -680,5 +876,166 @@ mod tests {
         let (host, port) = get_conn_address(&opts, &uri).unwrap();
         assert_eq!(host, "10.0.0.1");
         assert_eq!(port, 80);
+    }
+
+    #[test]
+    fn parse_netscape_cookies() {
+        let cookie_file_content = "# Netscape HTTP Cookie File\n# https://curl.se/docs/http-cookies.html\n# This file was generated by libcurl! Edit at your own risk.\n\n#HttpOnly_192.168.100.1\tFALSE\t/\tFALSE\t1791996223\tRefreshToken\tmock_refresh_token_e95ee2a2dd996de43f5274f9810e48576f321e03\n#HttpOnly_192.168.100.1\tFALSE\t/\tFALSE\t1791395023\tOauthHMAC\tpfNHqMcbIXg1E3EYm3N+6zyLku4zU6F9I/INH4BMMpg=\n#HttpOnly_192.168.100.1\tFALSE\t/\tFALSE\t1791395023\tOauthExpires\t1791395023\n#HttpOnly_192.168.100.1\tFALSE\t/\tFALSE\t1791395023\tBearerToken\tmock_bearer_token_eb761c2f7d857ef06e9599cfb7d5dc3da8b78ccf\n";
+        let cookies = parse_cookie_str(cookie_file_content);
+        assert_eq!(cookies.len(), 4);
+
+        assert_eq!(cookies[0].domain, "192.168.100.1");
+        assert!(!cookies[0].include_subdomains);
+        assert_eq!(cookies[0].path, "/");
+        assert!(!cookies[0].secure);
+        assert_eq!(cookies[0].expires, 1791996223);
+        assert_eq!(cookies[0].name, "RefreshToken");
+        assert_eq!(cookies[0].value, "mock_refresh_token_e95ee2a2dd996de43f5274f9810e48576f321e03");
+        assert!(cookies[0].http_only);
+
+        assert_eq!(cookies[3].name, "BearerToken");
+        assert_eq!(cookies[3].value, "mock_bearer_token_eb761c2f7d857ef06e9599cfb7d5dc3da8b78ccf");
+    }
+
+    #[test]
+    fn parse_space_separated_cookies() {
+        let cookie_file_content = "# Netscape HTTP Cookie File\n#HttpOnly_192.168.100.1 FALSE   /       FALSE   1791996223      RefreshToken    mock_token_123\n";
+        let cookies = parse_cookie_str(cookie_file_content);
+        assert_eq!(cookies.len(), 1);
+        assert_eq!(cookies[0].domain, "192.168.100.1");
+        assert_eq!(cookies[0].name, "RefreshToken");
+        assert_eq!(cookies[0].value, "mock_token_123");
+    }
+
+    #[test]
+    fn build_headers_with_cookies_file() {
+        let temp_dir = std::env::temp_dir();
+        let cookie_file = temp_dir.join(format!("plumbrs_test_cookies_{}.txt", std::process::id()));
+        let content = "# Netscape HTTP Cookie File\n#HttpOnly_192.168.100.1\tFALSE\t/\tFALSE\t2000000000\tRefreshToken\tmock_refresh\n#HttpOnly_192.168.100.1\tFALSE\t/\tFALSE\t2000000000\tBearerToken\tmock_bearer\n";
+        std::fs::write(&cookie_file, content).unwrap();
+
+        let opts = Options::parse_from([
+            "plumbrs",
+            "--cookies",
+            cookie_file.to_str().unwrap(),
+            "http://192.168.100.1/api",
+        ]);
+        let uri: http::Uri = "http://192.168.100.1/api".parse().unwrap();
+        let headers = build_headers(&uri, &opts).unwrap();
+        let cookie_val = headers.get(header::COOKIE).unwrap().to_str().unwrap();
+        assert_eq!(cookie_val, "RefreshToken=mock_refresh; BearerToken=mock_bearer");
+
+        let _ = std::fs::remove_file(cookie_file);
+    }
+
+    #[test]
+    fn match_cookies_domain_rules() {
+        let cookies = vec![
+            Cookie {
+                domain: ".example.com".to_string(),
+                include_subdomains: true,
+                path: "/".to_string(),
+                secure: false,
+                expires: 0,
+                name: "c1".to_string(),
+                value: "v1".to_string(),
+                http_only: false,
+            },
+            Cookie {
+                domain: "example.com".to_string(),
+                include_subdomains: false,
+                path: "/".to_string(),
+                secure: false,
+                expires: 0,
+                name: "c2".to_string(),
+                value: "v2".to_string(),
+                http_only: false,
+            },
+        ];
+
+        let uri_sub: http::Uri = "http://sub.example.com/test".parse().unwrap();
+        let m_sub = match_cookies(&cookies, &uri_sub, None);
+        assert_eq!(m_sub.len(), 1);
+        assert_eq!(m_sub[0].name, "c1");
+
+        let uri_exact: http::Uri = "http://example.com/test".parse().unwrap();
+        let m_exact = match_cookies(&cookies, &uri_exact, None);
+        assert_eq!(m_exact.len(), 2);
+
+        let uri_other: http::Uri = "http://other.com/test".parse().unwrap();
+        let m_other = match_cookies(&cookies, &uri_other, None);
+        assert_eq!(m_other.len(), 0);
+    }
+
+    #[test]
+    fn match_cookies_path_and_secure() {
+        let cookies = vec![
+            Cookie {
+                domain: "example.com".to_string(),
+                include_subdomains: false,
+                path: "/api".to_string(),
+                secure: false,
+                expires: 0,
+                name: "p1".to_string(),
+                value: "v1".to_string(),
+                http_only: false,
+            },
+            Cookie {
+                domain: "example.com".to_string(),
+                include_subdomains: false,
+                path: "/".to_string(),
+                secure: true,
+                expires: 0,
+                name: "sec".to_string(),
+                value: "v2".to_string(),
+                http_only: false,
+            },
+        ];
+
+        let uri_http: http::Uri = "http://example.com/api/v1".parse().unwrap();
+        let m_http = match_cookies(&cookies, &uri_http, None);
+        assert_eq!(m_http.len(), 1);
+        assert_eq!(m_http[0].name, "p1");
+
+        let uri_https: http::Uri = "https://example.com/api/v1".parse().unwrap();
+        let m_https = match_cookies(&cookies, &uri_https, None);
+        assert_eq!(m_https.len(), 2);
+        assert_eq!(m_https[0].name, "p1");
+        assert_eq!(m_https[1].name, "sec");
+
+        let uri_nomatch: http::Uri = "http://example.com/apicall".parse().unwrap();
+        let m_nomatch = match_cookies(&cookies, &uri_nomatch, None);
+        assert_eq!(m_nomatch.len(), 0);
+    }
+
+    #[test]
+    fn match_cookies_expiration() {
+        let cookies = vec![
+            Cookie {
+                domain: "example.com".to_string(),
+                include_subdomains: false,
+                path: "/".to_string(),
+                secure: false,
+                expires: 1000,
+                name: "expired".to_string(),
+                value: "val".to_string(),
+                http_only: false,
+            },
+            Cookie {
+                domain: "example.com".to_string(),
+                include_subdomains: false,
+                path: "/".to_string(),
+                secure: false,
+                expires: 0,
+                name: "session".to_string(),
+                value: "val".to_string(),
+                http_only: false,
+            },
+        ];
+
+        let uri: http::Uri = "http://example.com/".parse().unwrap();
+        let matched = match_cookies(&cookies, &uri, None);
+        assert_eq!(matched.len(), 1);
+        assert_eq!(matched[0].name, "session");
     }
 }

@@ -95,6 +95,12 @@ fn check_options(opts: &mut Options) -> Result<()> {
         }
     }
 
+    if let Some(ref path) = opts.cookies
+        && !path.exists()
+    {
+        return Err(anyhow!("cookie file '{}' does not exist", path.display()));
+    }
+
     match opts.client_type {
         #[cfg(all(target_os = "linux", feature = "tokio_uring"))]
         ClientType::TokioUring if opts.http2 => {

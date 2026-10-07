@@ -1,4 +1,4 @@
-use std::{convert::Infallible, time::Duration};
+use std::{convert::Infallible, path::PathBuf, time::Duration};
 
 use crate::client::ClientType;
 use anyhow::Result;
@@ -87,6 +87,11 @@ pub struct Options {
     pub headers: Vec<(String, String)>,
     #[arg(help = "HTTP trailers", short = 'T', long = "trailer", value_parser = parse_key_val)]
     pub trailers: Vec<(String, String)>,
+    #[arg(
+        help = "Path to cookie file (Netscape/curl format)",
+        long = "cookies"
+    )]
+    pub cookies: Option<PathBuf>,
     #[arg(
         help = "Body of the request; can be specified multiple times. @path read body from file",
         short = 'b',
