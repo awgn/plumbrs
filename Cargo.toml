@@ -1,6 +1,6 @@
 [package]
 name = "plumbrs"
-version = "0.38.0"
+version = "0.39.0"
 edition = "2024"
 authors = ["Nicola Bonelli <nicola@larthia.com>"]
 description = "A high-performance HTTP/1.1 and HTTP/2 benchmarking tool"
@@ -12,30 +12,30 @@ categories = ["command-line-utilities", "network-programming"]
 
 [dependencies]
 bytes = "1.12.1"
-clap = { version = "4.6.6", features = ["derive"] }
+clap = { version = "4.6.7", features = ["derive"] }
 futures = "0.3.34"
-h2 = "0.4.19"
+h2 = "0.4.20"
 http = "1.5.0"
 httparse = "1.10.1"
-hyper = { version = "1.11.1", features = ["full"] }
+hyper = { version = "1.12.0", features = ["full"] }
 pretty_env_logger = "0.5.0"
-tokio = { version = "1.53.1", features = ["full"] }
+tokio = { version = "1.53.2", features = ["full"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
-tokio-util = { version = "0.7.19", features = ["full"] }
+tokio-util = { version = "0.7.20", features = ["full"] }
 tower = { version = "0.5.3", features = ["full"] }
-hyper-util = { version = "0.1.20", features = ["client", "client-legacy", "http1", "http2", "service", "tokio"] }
+hyper-util = { version = "0.1.21", features = ["client", "client-legacy", "http1", "http2", "service", "tokio"] }
 http-body-util = "0.1.5"
 anyhow = "1.0.104"
 reqwest = { version = "0.13", features = ["stream"] }
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"] }
-rmcp = { version = "3.2", optional = true }
+rmcp = { version = "3.5", optional = true }
 rand = "0.10"
 atomic-time = "0.2.1"
 crossterm = "0.29"
 hdrhistogram = "7.6.0"
 futures-util = "0.3.34"
 tabled = "0.22"
-http_wire = "0.8.0"
+http_wire = "0.9.0"
 const_format = "0.2.36"
 quanta = "0.12.6"
 webpki-roots = "1"
