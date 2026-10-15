@@ -13,7 +13,7 @@ use rmcp::model::{
     CallToolRequest, CallToolRequestParams, ClientCapabilities, ErrorCode, ErrorData,
     Implementation, InitializeRequest, InitializeRequestParams, InitializeResult,
     InitializedNotification, JsonObject, JsonRpcError, JsonRpcRequest, JsonRpcResponse,
-    ListToolsRequest, ListToolsResult, NumberOrString, Tool,
+    ListToolsRequest, ListToolsResult, NumberOrString, ProtocolVersion, Tool,
 };
 use rmcp::serde_json::{self, Map, Value};
 
@@ -554,10 +554,13 @@ where
 {
     // Step 1: Send MCP initialize request
     // Note: no client capabilities advertised (roots was removed by SEP-2577).
+    // Use LATEST_WITH_INITIALIZE (2025-11-25): ProtocolVersion::default() in rmcp >= 3.4
+    // points to 2026-07-28 (SEP-2567), which removed the initialize handshake.
     let init_params = InitializeRequestParams::new(
         ClientCapabilities::builder().build(),
         Implementation::new("plumbrs".to_string(), env!("CARGO_PKG_VERSION").to_string()),
-    );
+    )
+    .with_protocol_version(ProtocolVersion::LATEST_WITH_INITIALIZE);
 
     let init_request = InitializeRequest::new(init_params);
 
@@ -885,10 +888,13 @@ where
     }
 
     // Step 2: Send MCP initialize request (no client capabilities: roots was removed by SEP-2577)
+    // Use LATEST_WITH_INITIALIZE (2025-11-25): ProtocolVersion::default() in rmcp >= 3.4
+    // points to 2026-07-28 (SEP-2567), which removed the initialize handshake.
     let init_params = InitializeRequestParams::new(
         ClientCapabilities::builder().build(),
         Implementation::new("plumbrs".to_string(), env!("CARGO_PKG_VERSION").to_string()),
-    );
+    )
+    .with_protocol_version(ProtocolVersion::LATEST_WITH_INITIALIZE);
 
     let init_request = InitializeRequest::new(init_params);
 

@@ -1,6 +1,6 @@
 [package]
 name = "plumbrs"
-version = "0.39.0"
+version = "0.40.0"
 edition = "2024"
 authors = ["Nicola Bonelli <nicola@larthia.com>"]
 description = "A high-performance HTTP/1.1 and HTTP/2 benchmarking tool"
@@ -19,7 +19,7 @@ http = "1.5.0"
 httparse = "1.10.1"
 hyper = { version = "1.12.0", features = ["full"] }
 pretty_env_logger = "0.5.0"
-tokio = { version = "1.53.2", features = ["full"] }
+tokio = { version = "1.53.3", features = ["full"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 tokio-util = { version = "0.7.20", features = ["full"] }
 tower = { version = "0.5.3", features = ["full"] }
