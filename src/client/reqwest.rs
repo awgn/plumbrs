@@ -2,9 +2,9 @@ use crate::stats::{RealtimeStats, Statistics};
 use crate::{Options, fatal};
 
 use http::header::HeaderValue;
-use http::{HeaderMap, StatusCode, header};
+use http::{StatusCode, header};
 
-use crate::client::utils::{build_headers, should_stop};
+use crate::client::utils::{build_request_targets, should_stop};
 use reqwest::{Client, ClientBuilder, Request, Result, Url};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -26,8 +26,9 @@ pub async fn http_reqwest(
 
     let url = Url::parse(uri_str).unwrap_or_else(|e| fatal!(1, "invalid url: {e}"));
 
-    let headers = build_headers(&uri, opts.as_ref())
-        .unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
+    let targets = build_request_targets(&uri, opts.as_ref(), false)
+        .unwrap_or_else(|e| fatal!(2, "could not build request targets: {e}"));
+    let mut target_idx = (opts.conn_base + cid) % targets.len();
 
     let bodies: Vec<String> = opts.bodies().map_or_else(
         |e| fatal!(2, "could not read body: {e}"),
@@ -55,7 +56,7 @@ pub async fn http_reqwest(
             );
         }
 
-        let mut client = match build_http_client(opts.as_ref(), &headers) {
+        let mut client = match build_http_client(opts.as_ref()) {
             Ok(client) => client,
             Err(e) => {
                 fatal!(4, "could not build reqwest http client: {e}");
@@ -71,11 +72,17 @@ pub async fn http_reqwest(
 
             let body = bodies.get(total as usize).or(bodies.last());
 
+            let target = &targets[target_idx];
+            target_idx += 1;
+            if target_idx == targets.len() {
+                target_idx = 0;
+            }
+
             let mut req = Request::new(
                 opts.method.clone().unwrap_or(http::Method::GET),
                 url.clone(),
             );
-            let mut req_headers = headers.clone();
+            let mut req_headers = target.headers.clone();
             if is_last {
                 req_headers.insert(header::CONNECTION, HeaderValue::from_static("close"));
             }
@@ -116,7 +123,7 @@ pub async fn http_reqwest(
             }
 
             if is_last {
-                client = match build_http_client(opts.as_ref(), &headers) {
+                client = match build_http_client(opts.as_ref()) {
                     Ok(client) => client,
                     Err(e) => {
                         fatal!(4, "could not build reqwest http client: {e}");
@@ -130,8 +137,8 @@ pub async fn http_reqwest(
     statistics
 }
 
-pub fn build_http_client(opts: &Options, headers: &HeaderMap) -> Result<Client> {
-    let mut builder = ClientBuilder::new().default_headers(headers.clone());
+pub fn build_http_client(opts: &Options) -> Result<Client> {
+    let mut builder = ClientBuilder::new();
     // Note: reqwest can only pin the source *IP*, not the source port, so
     // --local-port-range/--rss-* are rejected for this client in check_options.
     if let Some(ip) = opts.local_addr {

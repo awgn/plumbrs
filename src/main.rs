@@ -126,7 +126,7 @@ fn check_options(opts: &mut Options) -> Result<()> {
             return Err(anyhow!("Missing URI. Try --help"));
         }
 
-        ClientType::Reqwest if opts.sni.is_some() => {
+        ClientType::Reqwest if !opts.sni.is_empty() => {
             return Err(anyhow!("SNI option not available with reqwest client!"));
         }
         ClientType::HyperLegacy | ClientType::HyperRt1 | ClientType::Reqwest
@@ -189,6 +189,20 @@ fn check_options(opts: &mut Options) -> Result<()> {
             .unwrap_or(false)
     });
 
+    if !opts.host.is_empty() {
+        opts.host = crate::options::expand_range_patterns(&opts.host)?;
+        if opts.host.iter().any(|h| h.is_empty()) {
+            return Err(anyhow!("Host header value cannot be empty"));
+        }
+    }
+
+    if !opts.sni.is_empty() {
+        opts.sni = crate::options::expand_range_patterns(&opts.sni)?;
+        if opts.sni.iter().any(|s| s.is_empty()) {
+            return Err(anyhow!("SNI server name cannot be empty"));
+        }
+    }
+
     if has_https {
         if !opts.client_type.supports_https() {
             return Err(anyhow!(
@@ -197,12 +211,8 @@ fn check_options(opts: &mut Options) -> Result<()> {
             ));
         }
         crate::client::tls::init(opts.insecure);
-    } else if opts.sni.is_some() {
+    } else if !opts.sni.is_empty() {
         return Err(anyhow!("--sni requires an https:// URI"));
-    }
-
-    if opts.sni.as_ref().is_some_and(|s| s.is_empty()) {
-        return Err(anyhow!("SNI server name cannot be empty"));
     }
 
     if let Some(nt) = opts.multithreaded

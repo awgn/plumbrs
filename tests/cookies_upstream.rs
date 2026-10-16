@@ -45,7 +45,8 @@ fn spawn_endpoint(captured: Arc<Mutex<Vec<String>>>) -> u16 {
                         let mut writer = stream;
                         if let Ok(Some(cookie)) = read_request_cookie(&mut reader) {
                             captured.lock().unwrap().push(cookie);
-                            let _ = writer.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok");
+                            let _ =
+                                writer.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok");
                         }
                     });
                 }

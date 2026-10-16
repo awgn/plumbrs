@@ -88,7 +88,7 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
         mcp = mcp_sse_initialize::<B>(uri_str, opts, &headers).await;
         uri = mcp.uri;
 
-        if opts.host.is_none() {
+        if opts.host.is_empty() {
             if let Some(h) = uri.host() {
                 host = h.to_owned();
             }
@@ -99,35 +99,45 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
         }
     }
 
-    let req_uri = request_uri(&uri, opts.absolute_uri || opts.http2);
+    let mut targets = build_request_targets(&uri, opts, opts.absolute_uri || opts.http2)
+        .unwrap_or_else(|e| fatal!(2, "could not build request targets: {e}"));
 
     // MCP requires Content-Type: application/json for JSON-RPC requests
     // Accept header must include both application/json and text/event-stream for Streamable HTTP
-    headers.insert(
-        header::CONTENT_TYPE,
-        header::HeaderValue::from_static(MIME_APPLICATION_JSON),
-    );
+    let accept_val = if opts.mcp_sse {
+        header::HeaderValue::from_static(MIME_APPLICATION_JSON)
+    } else {
+        header::HeaderValue::from_static(MIME_APPLICATION_JSON_AND_EVENT_STREAM)
+    };
     let transport = if opts.mcp_sse {
-        headers.insert(
-            header::ACCEPT,
-            header::HeaderValue::from_static(MIME_APPLICATION_JSON),
-        );
         "sse"
     } else {
-        headers.insert(
-            header::ACCEPT,
-            header::HeaderValue::from_static(MIME_APPLICATION_JSON_AND_EVENT_STREAM),
-        );
         "streamableHttp"
     };
 
-    // Pre-build the connection-closing header set once: the hot loop then only
+    for t in &mut targets {
+        t.headers.insert(
+            header::CONTENT_TYPE,
+            header::HeaderValue::from_static(MIME_APPLICATION_JSON),
+        );
+        t.headers.insert(header::ACCEPT, accept_val.clone());
+    }
+    headers = targets[0].headers.clone();
+
+    // Pre-build the connection-closing header sets once: the hot loop then only
     // clones the matching set instead of cloning + inserting per request.
-    let mut headers_close = headers.clone();
-    headers_close.insert(
-        header::CONNECTION,
-        header::HeaderValue::from_static("close"),
-    );
+    let mut targets_close: Vec<HeaderMap> = targets
+        .iter()
+        .map(|t| {
+            let mut h = t.headers.clone();
+            h.insert(
+                header::CONNECTION,
+                header::HeaderValue::from_static("close"),
+            );
+            h
+        })
+        .collect();
+    let mut target_idx = (opts.conn_base + cid) % targets.len();
 
     let clock = quanta::Clock::new();
     let start = Instant::now();
@@ -151,10 +161,11 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
         }
 
         let locals = crate::rss::source_candidates(opts, cid, generation);
+        let sni = tls_server_name_at(opts, &uri, cid, generation);
         generation = generation.wrapping_add(1);
         let (mut sender, mut conn_task) = match B::build_connection(
             endpoint,
-            tls_server_name(opts, &uri),
+            sni,
             &mut statistics,
             rt_stats,
             opts,
@@ -179,17 +190,18 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
                     mcp = setup;
                     // Add session ID to headers for subsequent requests
                     if let Some(ref session_id) = mcp.session_id {
-                        headers.insert(
-                            HEADER_MCP_SESSION_ID.clone(),
-                            http::header::HeaderValue::from_str(session_id)
-                                .unwrap_or_else(|e| fatal!(3, "invalid session id: {e}")),
-                        );
-                        // Keep the pre-built closing set in sync.
-                        headers_close.clone_from(&headers);
-                        headers_close.insert(
-                            header::CONNECTION,
-                            header::HeaderValue::from_static("close"),
-                        );
+                        let sid_val = http::header::HeaderValue::from_str(session_id)
+                            .unwrap_or_else(|e| fatal!(3, "invalid session id: {e}"));
+                        for (t, tc) in targets.iter_mut().zip(targets_close.iter_mut()) {
+                            t.headers
+                                .insert(HEADER_MCP_SESSION_ID.clone(), sid_val.clone());
+                            tc.clone_from(&t.headers);
+                            tc.insert(
+                                header::CONNECTION,
+                                header::HeaderValue::from_static("close"),
+                            );
+                        }
+                        headers = targets[0].headers.clone();
                     }
                 }
                 Err(e) => {
@@ -214,14 +226,20 @@ async fn http_hyper_mcp_client<B: HttpConnectionBuilder>(
             conn_req_count += 1;
             let is_last = conn_req_count >= opts.rpc;
 
+            let cur_target = target_idx;
+            target_idx += 1;
+            if target_idx == targets.len() {
+                target_idx = 0;
+            }
+
             let mut req = Request::new(body);
             // MCP JSON-RPC requests must use POST method
             *req.method_mut() = http::Method::POST;
-            *req.uri_mut() = req_uri.clone();
+            *req.uri_mut() = targets[cur_target].uri.clone();
             *req.headers_mut() = if is_last {
-                headers_close.clone()
+                targets_close[cur_target].clone()
             } else {
-                headers.clone()
+                targets[cur_target].headers.clone()
             };
 
             let start_lat = opts.latency.then_some(clock.raw());

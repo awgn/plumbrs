@@ -8,8 +8,8 @@ use tokio_uring::net::TcpStream;
 
 use crate::{
     client::utils::{
-        build_conn_endpoint, build_headers, build_trailers, ensure_content_length,
-        get_conn_address, request_uri, should_stop,
+        build_conn_endpoint, build_request_targets, build_trailers, ensure_content_length,
+        get_conn_address, should_stop,
     },
     fatal,
     options::Options,
@@ -36,8 +36,8 @@ pub async fn http_io_uring(
         get_conn_address(&opts, &uri).unwrap_or_else(|| fatal!(1, "no host specified in uri"));
     let endpoint = build_conn_endpoint(&host, port);
 
-    let headers = build_headers(&uri, opts.as_ref())
-        .unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
+    let targets = build_request_targets(&uri, opts.as_ref(), opts.absolute_uri)
+        .unwrap_or_else(|e| fatal!(2, "could not build request targets: {e}"));
 
     let trailers = build_trailers(opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build trailers: {e}"));
@@ -45,31 +45,39 @@ pub async fn http_io_uring(
     let raw_bodies = opts
         .bodies()
         .unwrap_or_else(|e| fatal!(2, "could not read body: {e}"));
-    let headers = ensure_content_length(headers, raw_bodies.first().map(|b| b.len()).unwrap_or(0));
+    let body_len = raw_bodies.first().map(|b| b.len()).unwrap_or(0);
     let bodies: Vec<Full<Bytes>> = raw_bodies.into_iter().map(Full::new).collect::<Vec<_>>();
 
-    let body = bodies
+    let base_body = bodies
         .first()
         .cloned()
         .unwrap_or_else(|| Full::new(Bytes::new()));
 
-    let body = match &trailers {
-        None => Either::Left(body.clone()),
-        tr => {
-            let trailers = tr.clone().map(Ok);
-            Either::Right(body.clone().with_trailers(std::future::ready(trailers)))
-        }
-    };
-
-    let mut req = Request::new(body);
-    *req.method_mut() = opts.method.clone().unwrap_or(http::Method::GET);
-    *req.uri_mut() = request_uri(&uri, opts.absolute_uri);
-    *req.headers_mut() = headers.clone();
-
-    // Pre-serialize the request to bytes ONCE outside the loop for better performance
-    let request_bytes = req
-        .encode()
-        .unwrap_or_else(|e| fatal!(2, "could not serialize request: {e}"));
+    // Pre-serialize a request buffer for each target ONCE outside the loop for zero runtime overhead.
+    let request_bytes_templates: Vec<Bytes> = targets
+        .into_iter()
+        .map(|target| {
+            let headers = ensure_content_length(target.headers, body_len);
+            let body = match &trailers {
+                None => Either::Left(base_body.clone()),
+                tr => {
+                    let trailers = tr.clone().map(Ok);
+                    Either::Right(
+                        base_body
+                            .clone()
+                            .with_trailers(std::future::ready(trailers)),
+                    )
+                }
+            };
+            let mut req = Request::new(body);
+            *req.method_mut() = opts.method.clone().unwrap_or(http::Method::GET);
+            *req.uri_mut() = target.uri;
+            *req.headers_mut() = headers;
+            req.encode()
+                .unwrap_or_else(|e| fatal!(2, "could not serialize request: {e}"))
+        })
+        .collect();
+    let mut target_idx = (opts.conn_base + cid) % request_bytes_templates.len();
 
     let clock = quanta::Clock::new();
     let start = Instant::now();
@@ -109,14 +117,22 @@ pub async fn http_io_uring(
         // Buffer for reading responses
         let mut connection_buffer = Vec::new();
         let mut read_buf = vec![0u8; 4096];
-        let request = request_bytes.clone();
-        let mut request: Vec<u8> = request.into();
+        let mut request_buffers: Vec<Vec<u8>> = request_bytes_templates
+            .iter()
+            .map(|b| b.clone().into())
+            .collect();
         loop {
             let start_lat = opts.latency.then_some(clock.raw());
+            let cur_idx = target_idx;
+            target_idx += 1;
+            if target_idx == request_buffers.len() {
+                target_idx = 0;
+            }
+            let request = std::mem::take(&mut request_buffers[cur_idx]);
 
             // Write the pre-serialized request
             let (result, req_buf) = stream.write_all(request).await;
-            request = req_buf; // Get buffer back for next iteration
+            request_buffers[cur_idx] = req_buf; // Get buffer back for next iteration
 
             if let Err(ref err) = result {
                 statistics.set_error(err, rt_stats);

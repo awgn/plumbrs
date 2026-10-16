@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::client::utils::{
-    build_headers, build_http_connection_legacy, build_trailers, discard_body, should_stop,
+    build_http_connection_legacy, build_request_targets, build_trailers, discard_body, should_stop,
 };
 
 pub async fn http_hyper_legacy(
@@ -28,8 +28,11 @@ pub async fn http_hyper_legacy(
         .parse::<http::Uri>()
         .unwrap_or_else(|e| fatal!(1, "invalid uri: {e}"));
 
-    let headers = build_headers(&uri, opts.as_ref())
-        .unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
+    // hyper_legacy Client requires full URI to connect, so we keep `uri` on `req.uri_mut()`
+    // and rotate the pre-built HeaderMap (and for HTTP/2, Host header if not present).
+    let targets = build_request_targets(&uri, opts.as_ref(), true)
+        .unwrap_or_else(|e| fatal!(2, "could not build request targets: {e}"));
+    let mut target_idx = (opts.conn_base + cid) % targets.len();
 
     let trailers = build_trailers(opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build trailers: {e}"));
@@ -79,10 +82,16 @@ pub async fn http_hyper_legacy(
                 }
             };
 
+            let target = &targets[target_idx];
+            target_idx += 1;
+            if target_idx == targets.len() {
+                target_idx = 0;
+            }
+
             let mut req = Request::new(body);
             *req.method_mut() = opts.method.clone().unwrap_or(http::Method::GET);
             *req.uri_mut() = uri.clone();
-            let mut req_headers = headers.clone();
+            let mut req_headers = target.headers.clone();
             if is_last {
                 req_headers.insert(header::CONNECTION, HeaderValue::from_static("close"));
             }

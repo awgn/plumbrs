@@ -45,10 +45,9 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
         get_conn_address(&opts, &uri).unwrap_or_else(|| fatal!(1, "no host specified in uri"));
     let endpoint = build_conn_endpoint(&host, port);
 
-    let req_uri = request_uri(&uri, opts.absolute_uri || opts.http2);
-
-    let headers = build_headers(&uri, opts.as_ref())
-        .unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
+    let targets = build_request_targets(&uri, opts.as_ref(), opts.absolute_uri || opts.http2)
+        .unwrap_or_else(|e| fatal!(2, "could not build request targets: {e}"));
+    let mut target_idx = (opts.conn_base + cid) % targets.len();
 
     let trailers = build_trailers(opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build trailers: {e}"));
@@ -80,23 +79,18 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
         }
 
         let locals = crate::rss::source_candidates(&opts, cid, generation);
+        let sni = tls_server_name_at(&opts, &uri, cid, generation);
         generation = generation.wrapping_add(1);
-        let (mut sender, mut conn_task) = match B::build_connection(
-            endpoint,
-            tls_server_name(&opts, &uri),
-            &mut statistics,
-            rt_stats,
-            &opts,
-            &locals,
-        )
-        .await
-        {
-            Some(s) => s,
-            None => {
-                total += 1;
-                continue 'connection;
-            }
-        };
+        let (mut sender, mut conn_task) =
+            match B::build_connection(endpoint, sni, &mut statistics, rt_stats, &opts, &locals)
+                .await
+            {
+                Some(s) => s,
+                None => {
+                    total += 1;
+                    continue 'connection;
+                }
+            };
 
         statistics.inc_conn();
         conn_req_count = 0;
@@ -119,14 +113,20 @@ async fn http_hyper_client<B: HttpConnectionBuilder>(
             conn_req_count += 1;
             let is_last = conn_req_count >= opts.rpc;
 
-            let mut req_headers = headers.clone();
+            let target = &targets[target_idx];
+            target_idx += 1;
+            if target_idx == targets.len() {
+                target_idx = 0;
+            }
+
+            let mut req_headers = target.headers.clone();
             if is_last {
                 req_headers.insert(header::CONNECTION, HeaderValue::from_static("close"));
             }
 
             let mut req = Request::new(body);
             *req.method_mut() = opts.method.clone().unwrap_or(http::Method::GET);
-            *req.uri_mut() = req_uri.clone();
+            *req.uri_mut() = target.uri.clone();
             *req.headers_mut() = req_headers;
 
             let start_lat = opts.latency.then_some(clock.raw());

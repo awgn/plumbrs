@@ -34,15 +34,17 @@ pub async fn http_hyper_h2(
     let (host, port) =
         get_conn_address(&opts, &uri).unwrap_or_else(|| fatal!(1, "no host specified in uri"));
     let endpoint = build_conn_endpoint(&host, port);
-    let tls_name = tls_server_name(&opts, &uri);
 
     let bodies: Vec<Bytes> = opts
         .bodies()
         .unwrap_or_else(|e| fatal!(2, "could not read body: {e}"));
 
-    // http/2 use :authority: instead of Host header...
-    let headers = build_headers(&uri, opts.as_ref())
-        .unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
+    // http/2 uses :authority (from target.uri) instead of Host header...
+    let mut http2_opts = opts.as_ref().clone();
+    http2_opts.http2 = true;
+    let targets = build_request_targets(&uri, &http2_opts, true)
+        .unwrap_or_else(|e| fatal!(2, "could not build request targets: {e}"));
+    let mut target_idx = (opts.conn_base + cid) % targets.len();
 
     let trailers = build_trailers(opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build trailers: {e}"));
@@ -67,6 +69,7 @@ pub async fn http_hyper_h2(
         }
 
         let locals = crate::rss::source_candidates(&opts, cid, generation);
+        let tls_name = tls_server_name_at(&opts, &uri, cid, generation);
         generation = generation.wrapping_add(1);
         let (mut h2_client, connection) = match h2_connect(
             endpoint,
@@ -100,10 +103,16 @@ pub async fn http_hyper_h2(
 
             let body = bodies.get(total as usize).or(bodies.last());
 
+            let target = &targets[target_idx];
+            target_idx += 1;
+            if target_idx == targets.len() {
+                target_idx = 0;
+            }
+
             let mut req = Request::new(());
             *req.method_mut() = opts.method.clone().unwrap_or(http::Method::GET);
-            *req.uri_mut() = uri.clone();
-            *req.headers_mut() = headers.clone();
+            *req.uri_mut() = target.uri.clone();
+            *req.headers_mut() = target.headers.clone();
 
             h2_client = match h2_client.ready().await {
                 Ok(h2) => h2,

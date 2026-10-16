@@ -87,10 +87,7 @@ pub struct Options {
     pub headers: Vec<(String, String)>,
     #[arg(help = "HTTP trailers", short = 'T', long = "trailer", value_parser = parse_key_val)]
     pub trailers: Vec<(String, String)>,
-    #[arg(
-        help = "Path to cookie file (Netscape/curl format)",
-        long = "cookies"
-    )]
+    #[arg(help = "Path to cookie file (Netscape/curl format)", long = "cookies")]
     pub cookies: Option<PathBuf>,
     #[arg(
         help = "Body of the request; can be specified multiple times. @path read body from file",
@@ -238,12 +235,20 @@ pub struct Options {
     )]
     pub uring_sqpoll: Option<u32>,
 
-    #[arg(help = "Set the HTTP Host header (e.g. example.com)", long = "host")]
-    pub host: Option<String>,
+    #[arg(
+        help = "Set the HTTP Host header (repeatable, comma-separated, supports [min-max] ranges)",
+        long = "host",
+        value_delimiter = ','
+    )]
+    pub host: Vec<String>,
     #[arg(help = "Set the port to connect to (e.g. 8080)", long = "port")]
     pub port: Option<u16>,
-    #[arg(help = "Set the TLS SNI server name", long = "sni")]
-    pub sni: Option<String>,
+    #[arg(
+        help = "Set the TLS SNI server name (repeatable, comma-separated, supports [min-max] ranges)",
+        long = "sni",
+        value_delimiter = ','
+    )]
+    pub sni: Vec<String>,
     #[arg(
         help = "Send HTTP/1 request-target in absolute-form (e.g. http://host/path) instead of origin-form (/path)",
         long = "absolute-uri",
@@ -359,4 +364,91 @@ fn parse_key_val(s: &str) -> Result<(String, String), String> {
             let (key, value) = s.split_at(index);
             (key.to_string(), value[1..].to_string())
         })
+}
+
+/// Expand numeric `[min-max]` range patterns in a single string.
+///
+/// Multiple ranges in the same string are expanded via Cartesian product from
+/// left to right (e.g. `app-[1-2].tier-[1-2].com` -> 4 strings).
+/// Leading zeros on `min` preserve zero-padded width (e.g. `[01-03]` -> `01`, `02`, `03`).
+/// Bracketed expressions that are not numeric ranges (such as IPv6 literals `[::1]`)
+/// are left untouched. An inverted numeric range (`min > max`) returns an error.
+pub fn expand_range_pattern(pattern: &str) -> Result<Vec<String>> {
+    let mut results = vec![pattern.to_string()];
+    let mut search_from = 0;
+
+    loop {
+        let sample = &results[0];
+        if search_from >= sample.len() {
+            break;
+        }
+        let Some(rel_open) = sample[search_from..].find('[') else {
+            break;
+        };
+        let open_idx = search_from + rel_open;
+        let Some(rel_close) = sample[open_idx + 1..].find(']') else {
+            break;
+        };
+        let close_idx = open_idx + 1 + rel_close;
+        let inner = &sample[open_idx + 1..close_idx];
+
+        if let Some((min_str, max_str)) = inner.split_once('-')
+            && !min_str.is_empty()
+            && !max_str.is_empty()
+            && min_str.bytes().all(|b| b.is_ascii_digit())
+            && max_str.bytes().all(|b| b.is_ascii_digit())
+        {
+            let min_val: u64 = min_str
+                .parse()
+                .map_err(|_| anyhow::anyhow!("invalid range start in '[{inner}]'"))?;
+            let max_val: u64 = max_str
+                .parse()
+                .map_err(|_| anyhow::anyhow!("invalid range end in '[{inner}]'"))?;
+            if min_val > max_val {
+                anyhow::bail!(
+                    "invalid range '[{inner}]' in '{pattern}': start ({min_val}) > end ({max_val})"
+                );
+            }
+            let width = if min_str.len() > 1 && min_str.starts_with('0') {
+                min_str.len()
+            } else {
+                0
+            };
+            let count = (max_val - min_val + 1) as usize;
+            // All strings in `results` share the exact same suffix starting at `open_idx`,
+            // so `s.len() - sample.len()` gives the exact offset adjustment for each `s`.
+            let sample_len = sample.len();
+            let mut next_results = Vec::with_capacity(results.len().saturating_mul(count));
+            for s in &results {
+                let s_open = open_idx + s.len() - sample_len;
+                let s_close = close_idx + s.len() - sample_len;
+                let prefix = &s[..s_open];
+                let suffix = &s[s_close + 1..];
+                for val in min_val..=max_val {
+                    if width > 0 {
+                        next_results.push(format!("{prefix}{val:0width$}{suffix}"));
+                    } else {
+                        next_results.push(format!("{prefix}{val}{suffix}"));
+                    }
+                }
+            }
+            results = next_results;
+            // Advance search_from to the start of the just-expanded segment in `results[0]`.
+            search_from = open_idx;
+        } else {
+            // Not a numeric [min-max] range (e.g. IPv6 `[::1]`): skip past this bracket.
+            search_from = close_idx + 1;
+        }
+    }
+
+    Ok(results)
+}
+
+/// Expand all numeric `[min-max]` patterns across a list of specifications.
+pub fn expand_range_patterns(specs: &[String]) -> Result<Vec<String>> {
+    let mut out = Vec::new();
+    for spec in specs {
+        out.extend(expand_range_pattern(spec)?);
+    }
+    Ok(out)
 }

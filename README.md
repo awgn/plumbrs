@@ -41,11 +41,11 @@ Plumbrs is a high-performance HTTP/HTTP2 request generator designed for benchmar
 
 
 
-- `--host <HOST>` — Override the HTTP `Host` header (e.g. for virtual hosting). Defaults to the URI hostname/IP.
+- `--host <HOST>` — Override the HTTP `Host` header (or `:authority` in HTTP/2) for virtual hosting. Defaults to the URI hostname/IP. Can be repeated or comma-separated, and supports `[min-max]` numeric range patterns with optional zero-padding (e.g., `--host vh-[01-10].example.com,custom.org:9090`); multiple hosts are rotated round-robin across requests.
 
 - `--port <PORT>` — Override the port to connect to.
 
-- `--sni <NAME>` — Override the TLS SNI server name. Defaults to the URI hostname. Not available with `reqwest`.
+- `--sni <NAME>` — Override the TLS SNI server name. Defaults to the URI hostname. Can be repeated, comma-separated, and supports `[min-max]` numeric range patterns (e.g., `--sni sni-[1-4].example.com`); multiple names are rotated round-robin across connections and reconnects. Not available with `reqwest`.
 
 - `--absolute-uri` — Send the HTTP/1 request-target in absolute-form (`GET http://host/path`) instead of origin-form (`GET /path`). Origin-form is the default. Not available with `reqwest`, `hyper-legacy`, or `hyper-rt1`.
 
@@ -234,6 +234,14 @@ plumbrs -C hyper --rpc 1 -c 10 -r 1000 http://localhost:8080
 Latency-corrected benchmarking:
 ```
 plumbrs --latency -c 100 -d 30 http://localhost:8080
+```
+
+Virtual-host and TLS SNI rotation with range expansion:
+```
+plumbrs -c 64 -d 30 \
+  --host "vh-[01-16].example.com" \
+  --sni "vh-[01-16].example.com" \
+  https://192.168.1.10:8443/api
 ```
 
 ## Performance

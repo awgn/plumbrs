@@ -18,7 +18,7 @@ use std::future::Ready;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::client::utils::{build_headers, should_stop};
+use crate::client::utils::{build_request_targets, should_stop};
 
 type WithTrailersBody = http_body_util::combinators::WithTrailers<
     Full<Bytes>,
@@ -42,8 +42,9 @@ pub async fn http_hyper_rt1(
         .parse::<http::Uri>()
         .unwrap_or_else(|e| fatal!(1, "invalid uri: {e}"));
 
-    let headers = build_headers(&uri, opts.as_ref())
-        .unwrap_or_else(|e| fatal!(2, "could not build headers: {e}"));
+    let targets = build_request_targets(&uri, opts.as_ref(), true)
+        .unwrap_or_else(|e| fatal!(2, "could not build request targets: {e}"));
+    let mut target_idx = (opts.conn_base + cid) % targets.len();
 
     let trailers = build_trailers(opts.as_ref())
         .unwrap_or_else(|e| fatal!(2, "could not build trailers: {e}"));
@@ -80,12 +81,18 @@ pub async fn http_hyper_rt1(
             } else {
                 Either::Left(Full::new(bytes))
             };
+            let target = &targets[target_idx];
+            target_idx += 1;
+            if target_idx == targets.len() {
+                target_idx = 0;
+            }
+
             let mut req = Request::builder()
                 .method(opts.method.clone().unwrap_or(http::Method::GET))
                 .uri(uri.clone())
                 .body(body)
                 .unwrap();
-            *req.headers_mut() = headers.clone();
+            *req.headers_mut() = target.headers.clone();
 
             let start_lat = opts.latency.then_some(clock.raw());
 

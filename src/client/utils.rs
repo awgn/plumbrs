@@ -192,7 +192,9 @@ pub fn match_cookies<'a>(
             if cookie.include_subdomains {
                 let is_subdomain = req_host_lower.len() > clean_cookie_domain.len()
                     && req_host_lower.ends_with(clean_cookie_domain)
-                    && req_host_lower.as_bytes()[req_host_lower.len() - clean_cookie_domain.len() - 1] == b'.';
+                    && req_host_lower.as_bytes()
+                        [req_host_lower.len() - clean_cookie_domain.len() - 1]
+                        == b'.';
                 if is_subdomain {
                     return true;
                 }
@@ -207,9 +209,57 @@ pub fn match_cookies<'a>(
     matching
 }
 
+/// Format a host (or override) with an optional port from the URI or `--port`,
+/// unless the host already includes an explicit `:port` suffix.
+#[inline]
+pub fn format_host_authority(uri: &http::Uri, opts: &Options, host: &str) -> String {
+    let has_explicit_port = if let Some(rest) = host.strip_prefix('[') {
+        rest.split_once(']')
+            .is_some_and(|(_, after)| after.starts_with(':'))
+    } else {
+        host.contains(':')
+    };
+
+    if has_explicit_port {
+        host.to_string()
+    } else {
+        let port = uri
+            .port()
+            .map(|p| p.as_str().to_string())
+            .or_else(|| opts.port.map(|p| p.to_string()));
+        match port {
+            Some(port) => format!("{host}:{port}"),
+            None => host.to_string(),
+        }
+    }
+}
+
 pub fn build_headers(
     uri: &http::Uri,
     opts: &Options,
+) -> Result<HeaderMap, http::header::InvalidHeaderValue> {
+    let cookies = opts.cookies.as_ref().map(|cookie_path| {
+        parse_cookie_file(cookie_path).unwrap_or_else(|e| {
+            fatal!(
+                2,
+                "could not read cookie file '{}': {e}",
+                cookie_path.display()
+            )
+        })
+    });
+    build_headers_with_cookies(
+        uri,
+        opts,
+        opts.host.first().map(String::as_str),
+        cookies.as_deref(),
+    )
+}
+
+fn build_headers_with_cookies(
+    uri: &http::Uri,
+    opts: &Options,
+    host_override: Option<&str>,
+    cookies: Option<&[Cookie]>,
 ) -> Result<HeaderMap, http::header::InvalidHeaderValue> {
     let mut headers = HeaderMap::new();
 
@@ -232,11 +282,8 @@ pub fn build_headers(
         );
     }
 
-    if let Some(ref cookie_path) = opts.cookies {
-        let cookies = parse_cookie_file(cookie_path).unwrap_or_else(|e| {
-            fatal!(2, "could not read cookie file '{}': {e}", cookie_path.display())
-        });
-        let matching = match_cookies(&cookies, uri, opts.host.as_deref());
+    if let Some(cookies) = cookies {
+        let matching = match_cookies(cookies, uri, host_override);
         if !matching.is_empty() {
             let cookie_str = matching
                 .iter()
@@ -257,32 +304,60 @@ pub fn build_headers(
     }
 
     if !opts.http2 && !headers.contains_key(header::HOST) {
-        let host = opts.host.as_deref().or_else(|| uri.host());
-        let port = uri
-            .port()
-            .map(|p| p.as_str().to_string())
-            .or_else(|| opts.port.map(|p| p.to_string()));
-
+        let host = host_override.or_else(|| uri.host());
         if let Some(host) = host {
-            if host.contains(':') {
-                headers.append(header::HOST, HeaderValue::from_str(host)?);
-            } else {
-                match port {
-                    Some(ref port) => {
-                        headers.append(
-                            header::HOST,
-                            HeaderValue::from_str(&format!("{}:{}", host, port))?,
-                        );
-                    }
-                    None => {
-                        headers.append(header::HOST, HeaderValue::from_str(host)?);
-                    }
-                }
-            }
+            let formatted = format_host_authority(uri, opts, host);
+            headers.append(header::HOST, HeaderValue::from_str(&formatted)?);
         }
     }
 
     Ok(headers)
+}
+
+/// Pre-built request target (`Uri` + `HeaderMap`) for zero-overhead per-request host rotation.
+#[derive(Clone, Debug)]
+pub struct RequestTarget {
+    pub uri: http::Uri,
+    pub headers: HeaderMap,
+}
+
+/// Build the pre-compiled list of [`RequestTarget`]s for all configured `--host` values
+/// (or a single target derived from `uri` when `--host` is not specified).
+pub fn build_request_targets(
+    uri: &http::Uri,
+    opts: &Options,
+    absolute: bool,
+) -> Result<Vec<RequestTarget>, http::header::InvalidHeaderValue> {
+    let cookies = opts.cookies.as_ref().map(|cookie_path| {
+        parse_cookie_file(cookie_path).unwrap_or_else(|e| {
+            fatal!(
+                2,
+                "could not read cookie file '{}': {e}",
+                cookie_path.display()
+            )
+        })
+    });
+
+    if opts.host.is_empty() {
+        let req_uri = request_uri_for_host(uri, opts, absolute, None);
+        let headers = build_headers_with_cookies(uri, opts, None, cookies.as_deref())?;
+        return Ok(vec![RequestTarget {
+            uri: req_uri,
+            headers,
+        }]);
+    }
+
+    let mut targets = Vec::with_capacity(opts.host.len());
+    for host in &opts.host {
+        let req_uri = request_uri_for_host(uri, opts, absolute, Some(host.as_str()));
+        let headers =
+            build_headers_with_cookies(uri, opts, Some(host.as_str()), cookies.as_deref())?;
+        targets.push(RequestTarget {
+            uri: req_uri,
+            headers,
+        });
+    }
+    Ok(targets)
 }
 
 pub fn build_trailers(
@@ -343,6 +418,37 @@ pub fn request_uri(uri: &http::Uri, absolute: bool) -> http::Uri {
     }
 }
 
+/// Build the request URI, rewriting its authority when `absolute` is true (HTTP/2 or `--absolute-uri`)
+/// and a `host_override` is provided.
+#[inline]
+pub fn request_uri_for_host(
+    uri: &http::Uri,
+    opts: &Options,
+    absolute: bool,
+    host_override: Option<&str>,
+) -> http::Uri {
+    if !absolute {
+        return origin_form(uri);
+    }
+    let Some(host) = host_override else {
+        return uri.clone();
+    };
+    let authority_str = format_host_authority(uri, opts, host);
+    let mut parts = uri.clone().into_parts();
+    if parts.scheme.is_none() {
+        parts.scheme = Some(http::uri::Scheme::HTTP);
+    }
+    parts.authority = Some(
+        http::uri::Authority::from_str(&authority_str)
+            .unwrap_or_else(|e| fatal!(2, "invalid host authority '{authority_str}': {e}")),
+    );
+    if parts.path_and_query.is_none() {
+        parts.path_and_query = Some(http::uri::PathAndQuery::from_static("/"));
+    }
+    http::Uri::from_parts(parts)
+        .unwrap_or_else(|e| fatal!(2, "invalid request uri for host '{authority_str}': {e}"))
+}
+
 #[inline]
 pub fn origin_form(uri: &http::Uri) -> http::Uri {
     match uri.path_and_query() {
@@ -356,13 +462,24 @@ pub fn origin_form(uri: &http::Uri) -> http::Uri {
 
 #[inline]
 pub fn get_conn_address(opts: &Options, uri: &hyper::Uri) -> Option<(String, u16)> {
-    let host = uri.host().map(String::from).or_else(|| opts.host.clone())?;
     let default_port = match uri.scheme_str() {
         Some("https") => 443,
         _ if opts.http2 => 443,
         _ => 80,
     };
-    let mut port = uri.port_u16().unwrap_or(default_port);
+
+    let (host, fallback_port) = if let Some(h) = uri.host() {
+        (h.to_string(), uri.port_u16())
+    } else {
+        let first_host = opts.host.first()?;
+        if let Ok(auth) = http::uri::Authority::from_str(first_host) {
+            (auth.host().to_string(), auth.port_u16())
+        } else {
+            (first_host.clone(), None)
+        }
+    };
+
+    let mut port = fallback_port.unwrap_or(default_port);
     if let Some(ref p) = opts.port {
         port = *p;
     }
@@ -372,8 +489,25 @@ pub fn get_conn_address(opts: &Options, uri: &hyper::Uri) -> Option<(String, u16
 
 #[inline]
 pub fn tls_server_name<'a>(opts: &'a Options, uri: &'a http::Uri) -> Option<&'a str> {
+    tls_server_name_at(opts, uri, 0, 0)
+}
+
+#[inline]
+pub fn tls_server_name_at<'a>(
+    opts: &'a Options,
+    uri: &'a http::Uri,
+    cid: usize,
+    generation: u64,
+) -> Option<&'a str> {
     match uri.scheme_str() {
-        Some("https") => opts.sni.as_deref().or_else(|| uri.host()),
+        Some("https") => {
+            if !opts.sni.is_empty() {
+                let idx = (opts.conn_base + cid).wrapping_add(generation as usize) % opts.sni.len();
+                Some(opts.sni[idx].as_str())
+            } else {
+                uri.host()
+            }
+        }
         _ => None,
     }
 }
@@ -876,6 +1010,11 @@ mod tests {
         let (host, port) = get_conn_address(&opts, &uri).unwrap();
         assert_eq!(host, "10.0.0.1");
         assert_eq!(port, 80);
+
+        let opts_with_port = Options::parse_from(["plumbrs", "--host", "10.0.0.1:9090", "/api"]);
+        let (host, port) = get_conn_address(&opts_with_port, &uri).unwrap();
+        assert_eq!(host, "10.0.0.1");
+        assert_eq!(port, 9090);
     }
 
     #[test]
@@ -890,11 +1029,17 @@ mod tests {
         assert!(!cookies[0].secure);
         assert_eq!(cookies[0].expires, 1791996223);
         assert_eq!(cookies[0].name, "RefreshToken");
-        assert_eq!(cookies[0].value, "mock_refresh_token_e95ee2a2dd996de43f5274f9810e48576f321e03");
+        assert_eq!(
+            cookies[0].value,
+            "mock_refresh_token_e95ee2a2dd996de43f5274f9810e48576f321e03"
+        );
         assert!(cookies[0].http_only);
 
         assert_eq!(cookies[3].name, "BearerToken");
-        assert_eq!(cookies[3].value, "mock_bearer_token_eb761c2f7d857ef06e9599cfb7d5dc3da8b78ccf");
+        assert_eq!(
+            cookies[3].value,
+            "mock_bearer_token_eb761c2f7d857ef06e9599cfb7d5dc3da8b78ccf"
+        );
     }
 
     #[test]
@@ -923,7 +1068,10 @@ mod tests {
         let uri: http::Uri = "http://192.168.100.1/api".parse().unwrap();
         let headers = build_headers(&uri, &opts).unwrap();
         let cookie_val = headers.get(header::COOKIE).unwrap().to_str().unwrap();
-        assert_eq!(cookie_val, "RefreshToken=mock_refresh; BearerToken=mock_bearer");
+        assert_eq!(
+            cookie_val,
+            "RefreshToken=mock_refresh; BearerToken=mock_bearer"
+        );
 
         let _ = std::fs::remove_file(cookie_file);
     }
@@ -1037,5 +1185,141 @@ mod tests {
         let matched = match_cookies(&cookies, &uri, None);
         assert_eq!(matched.len(), 1);
         assert_eq!(matched[0].name, "session");
+    }
+
+    #[test]
+    fn expand_range_pattern_single_and_cartesian() {
+        let single = crate::options::expand_range_pattern("host-[1-3].example.com").unwrap();
+        assert_eq!(
+            single,
+            vec![
+                "host-1.example.com",
+                "host-2.example.com",
+                "host-3.example.com"
+            ]
+        );
+
+        let padded = crate::options::expand_range_pattern("vh-[008-010].local").unwrap();
+        assert_eq!(padded, vec!["vh-008.local", "vh-009.local", "vh-010.local"]);
+
+        let cartesian =
+            crate::options::expand_range_pattern("svc-[1-2].tier-[10-11].local").unwrap();
+        assert_eq!(
+            cartesian,
+            vec![
+                "svc-1.tier-10.local",
+                "svc-1.tier-11.local",
+                "svc-2.tier-10.local",
+                "svc-2.tier-11.local",
+            ]
+        );
+    }
+
+    #[test]
+    fn expand_range_pattern_preserves_ipv6_and_rejects_inverted() {
+        let ipv6 = crate::options::expand_range_pattern("[::1]:8080").unwrap();
+        assert_eq!(ipv6, vec!["[::1]:8080"]);
+
+        let ipv6_with_range =
+            crate::options::expand_range_pattern("[2001:db8::1]:808[0-1]").unwrap();
+        assert_eq!(
+            ipv6_with_range,
+            vec!["[2001:db8::1]:8080", "[2001:db8::1]:8081"]
+        );
+
+        assert!(crate::options::expand_range_pattern("host-[5-2].com").is_err());
+    }
+
+    #[test]
+    fn format_host_authority_handles_ipv6_without_port() {
+        let opts = Options::parse_from(["plumbrs", "http://127.0.0.1:8080/api"]);
+        let uri: http::Uri = "http://127.0.0.1:8080/api".parse().unwrap();
+        assert_eq!(
+            format_host_authority(&uri, &opts, "[2001:db8::1]"),
+            "[2001:db8::1]:8080"
+        );
+        assert_eq!(
+            format_host_authority(&uri, &opts, "[2001:db8::1]:9090"),
+            "[2001:db8::1]:9090"
+        );
+    }
+
+    #[test]
+    fn build_request_targets_http1_and_http2_authority() {
+        let mut opts = Options::parse_from([
+            "plumbrs",
+            "--host",
+            "vh-[1-2].example.com",
+            "--host",
+            "custom.org:9090",
+            "http://127.0.0.1:8080/api/v1?q=1",
+        ]);
+        opts.host = crate::options::expand_range_patterns(&opts.host).unwrap();
+
+        let uri: http::Uri = "http://127.0.0.1:8080/api/v1?q=1".parse().unwrap();
+
+        // HTTP/1 origin-form: URI is `/api/v1?q=1`, Host header rotates
+        let h1_targets = build_request_targets(&uri, &opts, false).unwrap();
+        assert_eq!(h1_targets.len(), 3);
+        assert_eq!(h1_targets[0].uri.to_string(), "/api/v1?q=1");
+        assert_eq!(
+            h1_targets[0].headers.get(header::HOST).unwrap(),
+            "vh-1.example.com:8080"
+        );
+        assert_eq!(
+            h1_targets[1].headers.get(header::HOST).unwrap(),
+            "vh-2.example.com:8080"
+        );
+        assert_eq!(
+            h1_targets[2].headers.get(header::HOST).unwrap(),
+            "custom.org:9090"
+        );
+
+        // HTTP/2: Host header omitted, `:authority` in target.uri rotates!
+        opts.http2 = true;
+        let h2_targets = build_request_targets(&uri, &opts, true).unwrap();
+        assert_eq!(h2_targets.len(), 3);
+        assert!(h2_targets[0].headers.get(header::HOST).is_none());
+        assert_eq!(
+            h2_targets[0].uri.to_string(),
+            "http://vh-1.example.com:8080/api/v1?q=1"
+        );
+        assert_eq!(
+            h2_targets[1].uri.to_string(),
+            "http://vh-2.example.com:8080/api/v1?q=1"
+        );
+        assert_eq!(
+            h2_targets[2].uri.to_string(),
+            "http://custom.org:9090/api/v1?q=1"
+        );
+    }
+
+    #[test]
+    fn tls_server_name_rotates_across_connections_and_generations() {
+        let mut opts = Options::parse_from([
+            "plumbrs",
+            "--sni",
+            "sni-[1-3].example.com",
+            "https://127.0.0.1:8443/api",
+        ]);
+        opts.sni = crate::options::expand_range_patterns(&opts.sni).unwrap();
+        let uri: http::Uri = "https://127.0.0.1:8443/api".parse().unwrap();
+
+        assert_eq!(
+            tls_server_name_at(&opts, &uri, 0, 0),
+            Some("sni-1.example.com")
+        );
+        assert_eq!(
+            tls_server_name_at(&opts, &uri, 1, 0),
+            Some("sni-2.example.com")
+        );
+        assert_eq!(
+            tls_server_name_at(&opts, &uri, 2, 0),
+            Some("sni-3.example.com")
+        );
+        assert_eq!(
+            tls_server_name_at(&opts, &uri, 0, 1),
+            Some("sni-2.example.com")
+        );
     }
 }
