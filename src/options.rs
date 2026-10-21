@@ -288,6 +288,35 @@ pub struct Options {
 }
 
 impl Options {
+    #[cfg(feature = "compio")]
+    pub fn can_use_compio(&self, has_https: bool) -> bool {
+        #[cfg(tokio_unstable)]
+        if self.disable_lifo_slot {
+            return false;
+        }
+
+        !has_https
+            && !self.http2
+            && self.rpc >= 100
+            && self.body.len() <= 1
+            && self.trailers.is_empty()
+            && self.multithreaded.unwrap_or(1) == 1
+            && !self.metrics
+            && self.global_queue_interval.is_none()
+            && self.event_interval.is_none()
+            && self.max_io_events_per_tick.is_none()
+            && self.http1_max_buf_size.is_none()
+            && self.http1_read_buf_exact_size.is_none()
+            && self.http1_writev.is_none()
+            && !self.http1_title_case_headers
+            && !self.http1_preserve_header_case
+            && self.http1_max_headers.is_none()
+            && !self.http1_allow_spaces_after_header_name_in_responses
+            && !self.http1_allow_obsolete_multiline_headers_in_responses
+            && !self.http1_ignore_invalid_headers_in_responses
+            && !self.http09_responses
+    }
+
     pub fn body_size(&self) -> u64 {
         self.body
             .iter()

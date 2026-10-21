@@ -223,6 +223,34 @@ fn check_options(opts: &mut Options) -> Result<()> {
         ));
     }
 
+    if matches!(opts.client_type, ClientType::Auto) {
+        #[cfg(feature = "mcp")]
+        let is_mcp = opts.mcp || opts.mcp_sse || !opts.mcp_tool.is_empty();
+        #[cfg(not(feature = "mcp"))]
+        let is_mcp = false;
+
+        if is_mcp {
+            #[cfg(feature = "mcp")]
+            {
+                opts.client_type = ClientType::HyperMcp;
+            }
+        } else if opts.body.len() > 1 {
+            opts.client_type = ClientType::HyperChunked;
+        } else {
+            #[cfg(feature = "compio")]
+            if opts.can_use_compio(has_https) {
+                opts.client_type = ClientType::Compio;
+            } else {
+                opts.client_type = ClientType::Hyper;
+            }
+
+            #[cfg(not(feature = "compio"))]
+            {
+                opts.client_type = ClientType::Hyper;
+            }
+        }
+    }
+
     crate::rss::init_source_ports(opts)?;
 
     Ok(())
