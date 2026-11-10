@@ -389,10 +389,8 @@ fn compile_tool_bodies(tools: &[&Tool], opts: &Options) -> Vec<Bytes> {
         .iter()
         .enumerate()
         .map(|(idx, tool)| {
-            let call_params = match create_tool_request(&tool.input_schema, opts, &mut rng) {
-                Some(args) => CallToolRequestParams::new(tool.name.clone()).with_arguments(args),
-                None => CallToolRequestParams::new(tool.name.clone()),
-            };
+            let args = create_tool_request(&tool.input_schema, opts, &mut rng);
+            let call_params = CallToolRequestParams::new(tool.name.clone()).with_arguments(args);
 
             let call_request = CallToolRequest::new(call_params);
 
@@ -415,41 +413,78 @@ fn compile_tool_bodies(tools: &[&Tool], opts: &Options) -> Vec<Bytes> {
         .collect()
 }
 
-/// Generates a tool request with fuzzy values based on the input schema.
-/// Returns None if the schema is invalid or missing required fields.
+/// Generates a tool request argument map with fuzzy values based on the input schema.
+/// Always returns a JSON object map (empty `{}` when the schema has no required fields),
+/// so `params.arguments` is never omitted or `null` when validated against `inputSchema`.
 fn create_tool_request<R: RngExt>(
-    arguments: &JsonObject,
+    input_schema: &JsonObject,
     opts: &Options,
     rng: &mut R,
-) -> Option<Map<String, Value>> {
-    let required = arguments.get("required")?.as_array()?;
-    let properties = arguments.get("properties")?.as_object()?;
-
-    let mut generated_request_args = Map::with_capacity(required.len());
-
-    for field_name in required.iter().filter_map(|v| v.as_str()) {
-        let field_schema = properties.get(field_name)?;
-        let value = generate_value_from_schema(field_schema, rng, opts, 0);
-        generated_request_args.insert(field_name.to_owned(), value);
-    }
-
-    Some(generated_request_args)
+) -> Map<String, Value> {
+    generate_object_from_schema(input_schema, input_schema, rng, opts, 0)
 }
 
 const MAX_RECURSION_DEPTH: usize = 10;
 
+fn generate_object_from_schema<R: RngExt>(
+    schema: &JsonObject,
+    root_schema: &JsonObject,
+    rng: &mut R,
+    opts: &Options,
+    depth: usize,
+) -> Map<String, Value> {
+    let Some(required) = schema.get("required").and_then(|r| r.as_array()) else {
+        return Map::new();
+    };
+    let Some(properties) = schema.get("properties").and_then(|p| p.as_object()) else {
+        return Map::new();
+    };
+
+    let mut obj = Map::with_capacity(required.len());
+    for field_name in required.iter().filter_map(|v| v.as_str()) {
+        if let Some(field_schema) = properties.get(field_name) {
+            obj.insert(
+                field_name.to_owned(),
+                generate_value_from_schema(field_schema, root_schema, rng, opts, depth + 1),
+            );
+        }
+    }
+    obj
+}
+
+fn resolve_json_pointer<'a>(root: &'a JsonObject, reference: &str) -> Option<&'a Value> {
+    let path = reference.strip_prefix("#/")?;
+    let mut parts = path.split('/');
+    let first = parts.next()?;
+    let mut current = root.get(first)?;
+    for part in parts {
+        let unescaped = part.replace("~1", "/").replace("~0", "~");
+        current = current.get(&unescaped)?;
+    }
+    Some(current)
+}
+
 fn generate_value_from_schema<R: RngExt>(
     schema: &Value,
+    root_schema: &JsonObject,
     rng: &mut R,
     opts: &Options,
     depth: usize,
 ) -> Value {
-    // Prevent infinite recursion with self-referencing schemas
     if depth >= MAX_RECURSION_DEPTH {
-        return Value::Null;
+        return Value::Object(Map::new());
     }
 
-    if let Some(default) = schema.get("default") {
+    if let Some(ref_str) = schema.get("$ref").and_then(Value::as_str)
+        && let Some(resolved) = resolve_json_pointer(root_schema, ref_str)
+    {
+        return generate_value_from_schema(resolved, root_schema, rng, opts, depth + 1);
+    }
+
+    // Ignore `"default": null` so nullable defaults do not override non-null target types.
+    if let Some(default) = schema.get("default")
+        && !default.is_null()
+    {
         return default.clone();
     }
     if let Some(c) = schema.get("const") {
@@ -458,11 +493,26 @@ fn generate_value_from_schema<R: RngExt>(
     if let Some(variants) = schema.get("enum").and_then(|v| v.as_array())
         && !variants.is_empty()
     {
-        return variants[rng.random_range(0..variants.len())].clone();
+        let non_null: Vec<&Value> = variants.iter().filter(|v| !v.is_null()).collect();
+        if !non_null.is_empty() {
+            return non_null[rng.random_range(0..non_null.len())].clone();
+        }
+        return variants[0].clone();
     }
 
-    // `type` may be a single name or an array (e.g. ["string", "null"]);
-    // pick the first non-null member without allocating.
+    for key in ["anyOf", "oneOf", "allOf"] {
+        if let Some(subschemas) = schema.get(key).and_then(Value::as_array)
+            && let Some(chosen) = subschemas
+                .iter()
+                .find(|s| s.get("type").and_then(Value::as_str) != Some("null"))
+                .or_else(|| subschemas.first())
+        {
+            return generate_value_from_schema(chosen, root_schema, rng, opts, depth + 1);
+        }
+    }
+
+    // `type` may be a single name, an array (e.g. ["string", "null"]), or omitted
+    // when inferred from `properties` / `items`.
     let type_str: &str = match schema.get("type") {
         Some(Value::String(s)) => s.as_str(),
         Some(Value::Array(types)) => types
@@ -470,6 +520,10 @@ fn generate_value_from_schema<R: RngExt>(
             .filter_map(Value::as_str)
             .find(|t| *t != "null")
             .unwrap_or("string"),
+        _ if schema.get("properties").is_some() || schema.get("additionalProperties").is_some() => {
+            "object"
+        }
+        _ if schema.get("items").is_some() => "array",
         _ => "string",
     };
 
@@ -512,29 +566,23 @@ fn generate_value_from_schema<R: RngExt>(
             let mut items = Vec::with_capacity(len);
             for _ in 0..len {
                 items.push(match items_schema {
-                    Some(s) => generate_value_from_schema(s, rng, opts, depth + 1),
+                    Some(s) => generate_value_from_schema(s, root_schema, rng, opts, depth + 1),
                     None => generate_primitive_value(rng),
                 });
             }
             Value::Array(items)
         }
         "object" => {
-            let Some(properties) = schema.get("properties").and_then(|p| p.as_object()) else {
+            let Some(schema_obj) = schema.as_object() else {
                 return Value::Object(Map::new());
             };
-            let Some(required) = schema.get("required").and_then(|r| r.as_array()) else {
-                return Value::Object(Map::new());
-            };
-            let mut obj = Map::with_capacity(required.len());
-            for field_name in required.iter().filter_map(|v| v.as_str()) {
-                if let Some(field_schema) = properties.get(field_name) {
-                    obj.insert(
-                        field_name.to_owned(),
-                        generate_value_from_schema(field_schema, rng, opts, depth + 1),
-                    );
-                }
-            }
-            Value::Object(obj)
+            Value::Object(generate_object_from_schema(
+                schema_obj,
+                root_schema,
+                rng,
+                opts,
+                depth,
+            ))
         }
         "null" => Value::Null,
         _ => {
@@ -1161,5 +1209,66 @@ mod tests {
 
         let err = filter_tools(&tools, &opts);
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn test_compile_tool_bodies_always_includes_arguments_object() {
+        let opts = Options::parse_from(["plumbrs", "http://localhost"]);
+        let schema: JsonObject = serde_json::from_value(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "optional_field": { "type": "string" }
+            }
+        }))
+        .unwrap();
+        let tool = Tool::new("no_required_tool", "desc", schema);
+        let bodies = compile_tool_bodies(&[&tool], &opts);
+        assert_eq!(bodies.len(), 1);
+
+        let parsed: Value = serde_json::from_slice(&bodies[0]).unwrap();
+        assert_eq!(parsed["method"], "tools/call");
+        assert_eq!(parsed["params"]["name"], "no_required_tool");
+        assert_eq!(parsed["params"]["arguments"], serde_json::json!({}));
+    }
+
+    #[test]
+    fn test_create_tool_request_ignores_null_default_and_resolves_ref_and_anyof() {
+        let opts = Options::parse_from(["plumbrs", "http://localhost"]);
+        let schema: JsonObject = serde_json::from_value(serde_json::json!({
+            "type": "object",
+            "$defs": {
+                "Filter": {
+                    "type": "object",
+                    "properties": {
+                        "tag": { "type": "string", "const": "prod" }
+                    },
+                    "required": ["tag"]
+                }
+            },
+            "properties": {
+                "cfg": {
+                    "type": "object",
+                    "default": null,
+                    "properties": {
+                        "enabled": { "type": "boolean", "default": true }
+                    },
+                    "required": ["enabled"]
+                },
+                "filter": {
+                    "anyOf": [
+                        { "$ref": "#/$defs/Filter" },
+                        { "type": "null" }
+                    ],
+                    "default": null
+                }
+            },
+            "required": ["cfg", "filter"]
+        }))
+        .unwrap();
+
+        let mut rng = rand::rng();
+        let args = create_tool_request(&schema, &opts, &mut rng);
+        assert_eq!(args["cfg"], serde_json::json!({ "enabled": true }));
+        assert_eq!(args["filter"], serde_json::json!({ "tag": "prod" }));
     }
 }
