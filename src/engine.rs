@@ -18,11 +18,11 @@ use crate::client::utils::build_http_connection_legacy;
 use crate::metrics::Metrics;
 use crate::stats::RealtimeStats;
 use crate::stats::Statistics;
-use atomic_time::AtomicDuration;
-use atomic_time::AtomicInstant;
+use contatori::{Monotone, Observable};
 #[cfg(all(target_os = "linux", feature = "monoio"))]
 use io_uring;
 
+use std::cell::Cell;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -33,7 +33,6 @@ use tokio::runtime::Builder;
 use tokio::task::JoinSet;
 
 use anyhow::Result;
-use std::sync::atomic::Ordering;
 
 use tabled::builder::Builder as TableBuilder;
 use tabled::settings::object::Columns;
@@ -55,9 +54,7 @@ pub fn run_tokio_engines(opts: Options) -> Result<()> {
         opts.connections / opts.threads
     );
 
-    let mut runtime_stats: Vec<RealtimeStats> = Vec::with_capacity(instances);
-    runtime_stats.resize_with(instances, Default::default);
-    let rt_stats = Arc::new(runtime_stats);
+    let rt_stats = Arc::new(RealtimeStats::new());
 
     // spawn tasks...
     let meters = Builder::new_multi_thread()
@@ -388,15 +385,18 @@ fn print_latency(total: &Statistics) {
     }
 }
 
+thread_local! {
+    static PARK_TIME: Cell<Option<Instant>> = const { Cell::new(None) };
+}
+
 fn tokio_thread(
     id: usize,
     opts: Options,
-    rt_stats: Arc<Vec<RealtimeStats>>,
+    rt_stats: Arc<RealtimeStats>,
 ) -> Result<(Statistics, Metrics)> {
     let opts = Arc::new(opts);
     let start = Instant::now();
-    let park_time = Arc::new(AtomicInstant::new(start));
-    let total_park_time = Arc::new(AtomicDuration::new(Duration::default()));
+    let total_park_nanos = Arc::new(Monotone::new().with_name("park_nanos"));
 
     let runtime = match opts.multithreaded {
         None => Builder::new_current_thread()
@@ -410,87 +410,27 @@ fn tokio_thread(
             .unwrap(),
 
         Some(num_threads) => {
+            let mut builder = Builder::new_multi_thread();
             #[cfg(tokio_unstable)]
-            match opts.disable_lifo_slot {
-                true => Builder::new_multi_thread()
-                    .disable_lifo_slot()
-                    .enable_all()
-                    .worker_threads(num_threads)
-                    .global_queue_interval(opts.global_queue_interval.unwrap_or(61))
-                    .event_interval(opts.event_interval.unwrap_or(61))
-                    .max_io_events_per_tick(opts.max_io_events_per_tick.unwrap_or(1024))
-                    .thread_name(format!("plumbrs-{}/m", id))
-                    .on_thread_park({
-                        let park_time = Arc::clone(&park_time);
-                        move || {
-                            park_time.store(Instant::now(), Ordering::Relaxed);
-                        }
-                    })
-                    .on_thread_unpark({
-                        let park_time = Arc::clone(&park_time);
-                        let total_park_time = Arc::clone(&total_park_time);
-                        move || {
-                            let delta = Instant::now() - park_time.load(Ordering::Relaxed);
-                            total_park_time.store(
-                                total_park_time.load(Ordering::Relaxed) + delta,
-                                Ordering::Relaxed,
-                            );
-                        }
-                    })
-                    .build()
-                    .unwrap(),
-
-                false => Builder::new_multi_thread()
-                    .enable_all()
-                    .worker_threads(num_threads)
-                    .global_queue_interval(opts.global_queue_interval.unwrap_or(61))
-                    .event_interval(opts.event_interval.unwrap_or(61))
-                    .max_io_events_per_tick(opts.max_io_events_per_tick.unwrap_or(1024))
-                    .thread_name(format!("plumbrs-{}/m", id))
-                    .on_thread_park({
-                        let park_time = Arc::clone(&park_time);
-                        move || {
-                            park_time.store(Instant::now(), Ordering::Relaxed);
-                        }
-                    })
-                    .on_thread_unpark({
-                        let park_time = Arc::clone(&park_time);
-                        let total_park_time = Arc::clone(&total_park_time);
-                        move || {
-                            let delta = Instant::now() - park_time.load(Ordering::Relaxed);
-                            total_park_time.store(
-                                total_park_time.load(Ordering::Relaxed) + delta,
-                                Ordering::Relaxed,
-                            );
-                        }
-                    })
-                    .build()
-                    .unwrap(),
+            if opts.disable_lifo_slot {
+                builder.disable_lifo_slot();
             }
-
-            #[cfg(not(tokio_unstable))]
-            Builder::new_multi_thread()
+            builder
                 .enable_all()
                 .worker_threads(num_threads)
                 .global_queue_interval(opts.global_queue_interval.unwrap_or(61))
                 .event_interval(opts.event_interval.unwrap_or(61))
                 .max_io_events_per_tick(opts.max_io_events_per_tick.unwrap_or(1024))
                 .thread_name(format!("plumbrs-{}/m", id))
-                .on_thread_park({
-                    let park_time = Arc::clone(&park_time);
-                    move || {
-                        park_time.store(Instant::now(), Ordering::Relaxed);
-                    }
+                .on_thread_park(|| {
+                    PARK_TIME.set(Some(Instant::now()));
                 })
                 .on_thread_unpark({
-                    let park_time = Arc::clone(&park_time);
-                    let total_park_time = Arc::clone(&total_park_time);
+                    let total_park_nanos = Arc::clone(&total_park_nanos);
                     move || {
-                        let delta = Instant::now() - park_time.load(Ordering::Relaxed);
-                        total_park_time.store(
-                            total_park_time.load(Ordering::Relaxed) + delta,
-                            Ordering::Relaxed,
-                        );
+                        if let Some(parked_at) = PARK_TIME.take() {
+                            total_park_nanos.add(parked_at.elapsed().as_nanos() as u64);
+                        }
                     }
                 })
                 .build()
@@ -500,9 +440,8 @@ fn tokio_thread(
 
     let mut stats = runtime.block_on(async { spawn_tasks(id, opts, rt_stats).await });
 
-    stats.idle_time(
-        total_park_time.load(Ordering::Relaxed).as_secs_f64() / start.elapsed().as_secs_f64(),
-    );
+    let park_secs = total_park_nanos.value().as_u64() as f64 * 1e-9;
+    stats.idle_time(park_secs / start.elapsed().as_secs_f64());
 
     let metrics = Metrics::new(&runtime.metrics());
 
@@ -513,7 +452,7 @@ fn tokio_thread(
 fn tokio_uring_thread(
     id: usize,
     opts: Options,
-    rt_stats: Arc<Vec<RealtimeStats>>,
+    rt_stats: Arc<RealtimeStats>,
 ) -> Result<(Statistics, Metrics)> {
     let metrics = Metrics::default();
     let opts = Arc::new(opts);
@@ -547,7 +486,7 @@ fn tokio_uring_thread(
 fn monoio_thread(
     id: usize,
     opts: Options,
-    rt_stats: Arc<Vec<RealtimeStats>>,
+    rt_stats: Arc<RealtimeStats>,
 ) -> Result<(Statistics, Metrics)> {
     let metrics = Metrics::default();
     let opts = Arc::new(opts);
@@ -578,7 +517,7 @@ fn monoio_thread(
                 let stats_clone = Arc::clone(&rt_stats);
 
                 tasks.push(monoio::spawn(async move {
-                    http_monoio(id, con, opts_clone, &stats_clone[id]).await
+                    http_monoio(id, con, opts_clone, &stats_clone).await
                 }));
             }
 
@@ -599,7 +538,7 @@ fn monoio_thread(
 fn compio_thread(
     id: usize,
     opts: Options,
-    rt_stats: Arc<Vec<RealtimeStats>>,
+    rt_stats: Arc<RealtimeStats>,
 ) -> Result<(Statistics, Metrics)> {
     let metrics = Metrics::default();
     let opts = Arc::new(opts);
@@ -635,7 +574,7 @@ fn compio_thread(
                 let stats_clone = Arc::clone(&rt_stats);
 
                 tasks.push(compio::runtime::spawn(async move {
-                    http_compio(id, con, opts_clone, &stats_clone[id]).await
+                    http_compio(id, con, opts_clone, &stats_clone).await
                 }));
             }
 
@@ -652,11 +591,7 @@ fn compio_thread(
     Ok((stats, metrics))
 }
 
-async fn spawn_tasks(
-    id: usize,
-    opts: Arc<Options>,
-    rt_stats: Arc<Vec<RealtimeStats>>,
-) -> Statistics {
+async fn spawn_tasks(id: usize, opts: Arc<Options>, rt_stats: Arc<RealtimeStats>) -> Statistics {
     let mut tasks = JoinSet::new();
     let mut statistics = Statistics::default();
 
@@ -673,52 +608,48 @@ async fn spawn_tasks(
         match opts.client_type {
             ClientType::Auto => {
                 if opts.body.len() > 1 {
-                    tasks.spawn(async move { http_hyper_chunked(id, con, opts, &stats[id]).await });
+                    tasks.spawn(async move { http_hyper_chunked(id, con, opts, &stats).await });
                 } else {
                     #[cfg(feature = "mcp")]
                     {
                         if opts.mcp || opts.mcp_sse || !opts.mcp_tool.is_empty() {
-                            tasks.spawn(
-                                async move { http_hyper_mcp(id, con, opts, &stats[id]).await },
-                            );
+                            tasks.spawn(async move { http_hyper_mcp(id, con, opts, &stats).await });
                         } else {
-                            tasks.spawn(async move { http_hyper(id, con, opts, &stats[id]).await });
+                            tasks.spawn(async move { http_hyper(id, con, opts, &stats).await });
                         }
                     }
                     #[cfg(not(feature = "mcp"))]
                     {
-                        tasks.spawn(async move { http_hyper(id, con, opts, &stats[id]).await });
+                        tasks.spawn(async move { http_hyper(id, con, opts, &stats).await });
                     }
                 }
             }
             ClientType::Hyper => {
-                tasks.spawn(async move { http_hyper(id, con, opts, &stats[id]).await });
+                tasks.spawn(async move { http_hyper(id, con, opts, &stats).await });
             }
             ClientType::HyperChunked => {
-                tasks.spawn(async move { http_hyper_chunked(id, con, opts, &stats[id]).await });
+                tasks.spawn(async move { http_hyper_chunked(id, con, opts, &stats).await });
             }
             ClientType::HyperLegacy => {
-                tasks.spawn(async move { http_hyper_legacy(id, con, opts, &stats[id]).await });
+                tasks.spawn(async move { http_hyper_legacy(id, con, opts, &stats).await });
             }
             ClientType::HyperRt1 => {
                 let con_client = client.as_ref().unwrap().clone();
-                tasks.spawn(
-                    async move { http_hyper_rt1(id, con, opts, con_client, &stats[id]).await },
-                );
+                tasks.spawn(async move { http_hyper_rt1(id, con, opts, con_client, &stats).await });
             }
             ClientType::HyperH2 => {
-                tasks.spawn(async move { http_hyper_h2(id, con, opts, &stats[id]).await });
+                tasks.spawn(async move { http_hyper_h2(id, con, opts, &stats).await });
             }
             #[cfg(feature = "mcp")]
             ClientType::HyperMcp => {
-                tasks.spawn(async move { http_hyper_mcp(id, con, opts, &stats[id]).await });
+                tasks.spawn(async move { http_hyper_mcp(id, con, opts, &stats).await });
             }
             ClientType::Reqwest => {
-                tasks.spawn(async move { http_reqwest(id, con, opts, &stats[id]).await });
+                tasks.spawn(async move { http_reqwest(id, con, opts, &stats).await });
             }
             #[cfg(all(target_os = "linux", feature = "tokio_uring"))]
             ClientType::TokioUring => {
-                tasks.spawn_local(async move { http_io_uring(id, con, opts, &stats[id]).await });
+                tasks.spawn_local(async move { http_io_uring(id, con, opts, &stats).await });
             }
             #[cfg(all(target_os = "linux", feature = "monoio"))]
             ClientType::Monoio => {
@@ -746,21 +677,26 @@ async fn spawn_tasks(
     statistics
 }
 
-pub async fn meter(rt_stats: Arc<Vec<RealtimeStats>>) {
+pub async fn meter(rt_stats: Arc<RealtimeStats>) {
     const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     let mut spinner_idx = 0;
+    let mut prev_ok = 0u64;
+    let mut prev_fail = 0u64;
+    let mut prev_err = 0u64;
 
     loop {
         tokio::time::sleep(Duration::from_millis(1000)).await;
-        let mut total_ok = 0u64;
-        let mut total_err = 0u64;
-        let mut total_fail = 0u64;
+        let cur_ok = rt_stats.ok.value().as_u64();
+        let cur_fail = rt_stats.fail.value().as_u64();
+        let cur_err = rt_stats.err.value().as_u64();
 
-        for stats in rt_stats.iter() {
-            total_ok += stats.ok.swap(0, Ordering::Relaxed);
-            total_err += stats.err.swap(0, Ordering::Relaxed);
-            total_fail += stats.fail.swap(0, Ordering::Relaxed);
-        }
+        let total_ok = cur_ok.wrapping_sub(prev_ok);
+        let total_fail = cur_fail.wrapping_sub(prev_fail);
+        let total_err = cur_err.wrapping_sub(prev_err);
+
+        prev_ok = cur_ok;
+        prev_fail = cur_fail;
+        prev_err = cur_err;
 
         eprint!(
             "\r{} Stats: ok: {total_ok}/sec, fail: {total_fail}/sec, err: {total_err}/sec",

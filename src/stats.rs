@@ -1,22 +1,29 @@
-use std::{collections::HashMap, error::Error, sync::atomic::AtomicU64};
+use std::{collections::HashMap, error::Error};
 
+use contatori::Monotone;
 use hdrhistogram::Histogram;
 
-#[repr(C)]
-#[repr(align(64))]
+#[derive(Debug)]
 pub struct RealtimeStats {
-    pub ok: AtomicU64,
-    pub fail: AtomicU64,
-    pub err: AtomicU64,
+    pub ok: Monotone,
+    pub fail: Monotone,
+    pub err: Monotone,
+}
+
+impl RealtimeStats {
+    #[must_use]
+    pub const fn new() -> Self {
+        RealtimeStats {
+            ok: Monotone::new().with_name("ok"),
+            fail: Monotone::new().with_name("fail"),
+            err: Monotone::new().with_name("err"),
+        }
+    }
 }
 
 impl Default for RealtimeStats {
     fn default() -> Self {
-        RealtimeStats {
-            ok: AtomicU64::new(0),
-            fail: AtomicU64::new(0),
-            err: AtomicU64::new(0),
-        }
+        Self::new()
     }
 }
 
@@ -51,7 +58,7 @@ impl Statistics {
 
     #[inline]
     pub fn inc_ok(&mut self, rt: &RealtimeStats) {
-        rt.ok.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        rt.ok.incr();
         self.ok += 1;
     }
 
@@ -78,12 +85,12 @@ impl Statistics {
     #[inline]
     pub fn set_http_status(&mut self, code: hyper::StatusCode, rt: &RealtimeStats) {
         if matches!(code, hyper::StatusCode::OK) {
-            rt.ok.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            rt.ok.incr();
             self.ok += 1;
             return;
         }
 
-        rt.fail.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        rt.fail.incr();
 
         let num = code.as_u16();
         if let Some(val) = self.status.get_mut(&num) {
@@ -95,7 +102,7 @@ impl Statistics {
 
     #[inline]
     pub fn set_error<E: Error + ?Sized>(&mut self, err: &E, rt: &RealtimeStats) {
-        rt.err.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        rt.err.incr();
         let err_kind = err.to_string();
         if let Some(val) = self.err.get_mut(&err_kind) {
             *val += 1;
@@ -193,5 +200,46 @@ impl std::ops::Add for Statistics {
                 (None, None) => None,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use contatori::Observable;
+    use std::sync::Arc;
+
+    #[test]
+    fn realtime_stats_tracks_ok_fail_and_errors_across_threads() {
+        let rt = Arc::new(RealtimeStats::new());
+        let mut handles = Vec::new();
+
+        for _ in 0..4 {
+            let rt = Arc::clone(&rt);
+            handles.push(std::thread::spawn(move || {
+                let mut stats = Statistics::new(false);
+                stats.inc_ok(&rt);
+                stats.set_http_status(hyper::StatusCode::OK, &rt);
+                stats.set_http_status(hyper::StatusCode::NOT_FOUND, &rt);
+                stats.set_http_status(hyper::StatusCode::INTERNAL_SERVER_ERROR, &rt);
+                let io_err = std::io::Error::other("boom");
+                stats.set_error(&io_err, &rt);
+                stats
+            }));
+        }
+
+        let total = handles
+            .into_iter()
+            .map(|h| h.join().unwrap())
+            .fold(Statistics::default(), |acc, s| acc + s);
+
+        assert_eq!(total.ok(), 8);
+        assert_eq!(total.status_4xx(), 4);
+        assert_eq!(total.status_5xx(), 4);
+        assert_eq!(total.errors(), 4);
+
+        assert_eq!(rt.ok.value().as_u64(), 8);
+        assert_eq!(rt.fail.value().as_u64(), 8);
+        assert_eq!(rt.err.value().as_u64(), 4);
     }
 }

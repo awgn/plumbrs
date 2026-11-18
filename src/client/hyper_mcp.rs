@@ -871,15 +871,21 @@ where
     let tls_name = tls_server_name(opts, &base_uri);
 
     // Create dummy stats for connection building
+    static DUMMY_RT_STATS: RealtimeStats = RealtimeStats::new();
     let mut stats = Statistics::new(false);
-    let rt_stats = RealtimeStats::default();
 
     // Step 1: SSE handshake to get the message endpoint
     // Build connection for SSE GET request (one-shot init: kernel source port).
-    let (mut sse_sender, sse_conn_task) =
-        B::build_connection::<Full<Bytes>>(endpoint, tls_name, &mut stats, &rt_stats, opts, &[])
-            .await
-            .unwrap_or_else(|| fatal!(3, "SSE connection failed"));
+    let (mut sse_sender, sse_conn_task) = B::build_connection::<Full<Bytes>>(
+        endpoint,
+        tls_name,
+        &mut stats,
+        &DUMMY_RT_STATS,
+        opts,
+        &[],
+    )
+    .await
+    .unwrap_or_else(|| fatal!(3, "SSE connection failed"));
 
     // Build SSE GET request
     let sse_req_uri = request_uri(&base_uri, opts.absolute_uri || opts.http2);
@@ -934,7 +940,7 @@ where
         endpoint,
         tls_name,
         &mut stats,
-        &rt_stats,
+        &DUMMY_RT_STATS,
         opts,
         &[],
     )
